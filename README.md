@@ -6,6 +6,33 @@ It provides explicit Blueprint nodes for replicated property writes, reads, even
 
 Current version: `0.2.1`
 
+## Preview
+
+![Replic multiplayer counter demo](Docs/Images/multiplayer-counter-demo.png)
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <img src="Docs/Images/replic-door-sound-event.png" width="100%" alt="Replicated door sound event"><br>
+      <sub>Replicated door logic with server-side state and replicated sound trigger</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="Docs/Images/component-transform-settings.png" width="100%" alt="Component transform replication settings"><br>
+      <sub>Component transform replication with persistent late-join state</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <img src="Docs/Images/replic-custom-event-settings.png" width="100%" alt="Replic custom event settings"><br>
+      <sub>Custom event replication settings directly in Blueprint details</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="Docs/Images/typed-event-arguments.png" width="100%" alt="Typed event argument nodes"><br>
+      <sub>Typed named values for replicated event arguments</sub>
+    </td>
+  </tr>
+</table>
+
 ## Features
 
 - Runtime transport component for replicated actors
@@ -71,6 +98,10 @@ See [QuickStart](Docs/QuickStart.md) for a small counter, door, and sound workfl
 
 For packaged builds, use a C++ project or an equivalent C++ build setup so Unreal can build and link the plugin runtime module.
 
+## License
+
+MIT License. See `LICENSE`.
+
 ## Star History
 
 <a href="https://www.star-history.com/?repos=bepooint%2FReplic&type=date&legend=top-left">
@@ -80,7 +111,3 @@ For packaged builds, use a C++ project or an equivalent C++ build setup so Unrea
    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=bepooint/Replic&type=date&legend=bottom-right" />
  </picture>
 </a>
-
-## License
-
-MIT License. See `LICENSE`.
