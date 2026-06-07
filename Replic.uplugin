@@ -1,0 +1,30 @@
+{
+	"FileVersion": 3,
+	"Version": 3,
+	"VersionName": "0.2.1",
+	"FriendlyName": "Replic",
+	"Description": "Blueprint-first replication helpers with editor metadata and runtime transport.",
+	"Category": "Networking",
+	"CreatedBy": "Vespera Games",
+	"EnabledByDefault": true,
+	"CanContainContent": false,
+	"Modules": [
+		{
+			"Name": "Replic",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "ReplicEditor",
+			"Type": "UncookedOnly",
+			"LoadingPhase": "PostEngineInit"
+		}
+	],
+	"CreatedByURL": "",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"IsBetaVersion": false,
+	"IsExperimentalVersion": false,
+	"Installed": true
+}
