@@ -2,7 +2,7 @@
 
 All notable changes to Replic are documented in this file.
 
-## [0.9.0-rc.1] - 2026-07-15
+## [0.9.0] - 2026-07-16
 
 ### Added
 

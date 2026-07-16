@@ -4,9 +4,9 @@ Replic is a Blueprint-first replication plugin for Unreal Engine 5.6.
 
 It provides explicit Blueprint nodes for replicated property writes, reads, events, observers, permissions, persistent late-join state, and component transform replication.
 
-Current version: `0.9.0-rc.1`
+Current version: `0.9.0`
 
-This is a release candidate for the planned stable `1.0.0` feature set. Large feature changes are frozen while installation, packaging, documentation, and multiplayer behavior are validated.
+This is the validated `0.9.0` release on the path to the stable `1.0.0` feature set. The explicit node-based workflow remains the supported default until the v1.0 criteria are complete.
 
 ## Preview
 
