@@ -142,8 +142,8 @@ MIT License. See `LICENSE`.
 
 <a href="https://www.star-history.com/?repos=bepooint%2FReplic&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=bepooint/Replic&type=date&theme=dark&legend=bottom-right" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=bepooint/Replic&type=date&legend=bottom-right" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=bepooint/Replic&type=date&legend=bottom-right" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=bepooint/Replic&type=date&theme=dark&legend=top-left&sealed_token=JTiBTQh4mWvDEEhX6W5NP21QQuAOZqfne1F4pERX3AheD03CLYcRYUlFQxhhsxNLAsXmJHERSjYVPM3b1lLwD-oGwazhSF7qqAZfhuihKrTZYVVQ_uFgDw" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=bepooint/Replic&type=date&legend=top-left&sealed_token=JTiBTQh4mWvDEEhX6W5NP21QQuAOZqfne1F4pERX3AheD03CLYcRYUlFQxhhsxNLAsXmJHERSjYVPM3b1lLwD-oGwazhSF7qqAZfhuihKrTZYVVQ_uFgDw" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=bepooint/Replic&type=date&legend=top-left&sealed_token=JTiBTQh4mWvDEEhX6W5NP21QQuAOZqfne1F4pERX3AheD03CLYcRYUlFQxhhsxNLAsXmJHERSjYVPM3b1lLwD-oGwazhSF7qqAZfhuihKrTZYVVQ_uFgDw" />
  </picture>
 </a>
