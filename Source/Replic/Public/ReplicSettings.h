@@ -14,6 +14,9 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Debug", meta = (ToolTip = "If enabled, Replic writes runtime debug information to the log."))
 	bool bEnableRuntimeDebugLogs = false;
 
+	UPROPERTY(Config, EditAnywhere, Category = "Debug", meta = (AdvancedDisplay, ToolTip = "If enabled, Replic includes routine request, apply, dispatch, state, and observer messages. Leave this disabled to log only warnings and errors for the enabled debug channels."))
+	bool bEnableVerboseRuntimeLogs = false;
+
 	UPROPERTY(Config, EditAnywhere, Category = "Debug", meta = (ToolTip = "If enabled, Replic also prints short runtime debug messages on screen during play."))
 	bool bEnableScreenDebugMessages = false;
 

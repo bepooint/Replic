@@ -1,4 +1,4 @@
-#include "K2Node_ReplicGetEnum.h"
+﻿#include "K2Node_ReplicGetEnum.h"
 
 #include "BlueprintActionDatabaseRegistrar.h"
 #include "BlueprintNodeSpawner.h"
@@ -195,7 +195,7 @@ void UK2Node_ReplicGetEnum::EarlyValidation(FCompilerResultsLog& MessageLog) con
 	const FName SelectedPropertyName(*PropertyPin->GetDefaultAsString());
 	if (SelectedPropertyName.IsNone())
 	{
-		MessageLog.Error(TEXT("Replic: No enum property is selected for @@"), this);
+		MessageLog.Error(TEXT("Replic: No Replic enum property is selected for @@. Choose a marked enum in the PropertyName dropdown."), this);
 		return;
 	}
 
@@ -205,7 +205,7 @@ void UK2Node_ReplicGetEnum::EarlyValidation(FCompilerResultsLog& MessageLog) con
 		UClass* TargetClass = nullptr;
 		if (!ReplicPinOptionResolver::ResolveTargetClass(PropertyPin, TargetClass))
 		{
-			MessageLog.Warning(TEXT("Replic: TargetObject could not be resolved to a concrete class for @@"), this);
+			MessageLog.Warning(TEXT("Replic: TargetObject could not be resolved to a concrete Blueprint class for @@. Connect a concrete actor/component reference or compile after the TargetObject type is known."), this);
 			return;
 		}
 

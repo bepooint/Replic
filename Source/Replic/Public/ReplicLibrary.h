@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "CoreMinimal.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
@@ -15,6 +15,12 @@ class REPLIC_API UReplicLibrary : public UBlueprintFunctionLibrary
 	GENERATED_BODY()
 
 public:
+	UFUNCTION(BlueprintPure, Category = "Replic|Debug", meta = (DefaultToSelf = "TargetObject", DisplayName = "Has Replic Transport Component", ToolTip = "Checks whether Replic can resolve TargetObject and its host actor currently owns a ReplicTransportComponent.\n\nThis diagnostic check never creates or adds a component."))
+	static bool HasReplicTransportComponent(UObject* TargetObject);
+
+	UFUNCTION(BlueprintCallable, Category = "Replic|Debug", meta = (DefaultToSelf = "TargetObject", DisplayName = "Get Marked Property Debug Info", ToolTip = "Inspects a marked property without changing gameplay state.\n\nReturns target resolution, transport presence, Replic settings, the current local value, and the locally stored persistent value. Return Value is true only when the target, property, and Replic configuration are valid."))
+	static bool GetMarkedPropertyDebugInfo(UObject* TargetObject, FName PropertyName, FReplicPropertyDebugInfo& DebugInfo);
+
 	UFUNCTION(BlueprintCallable, Category = "Replic", meta = (DefaultToSelf = "ObservedObject", ToolTip = "Registers an object so Replic can re-apply stored persistent state to it when needed.\n\nUse this for widgets or other observed objects that are created after the replicated state already exists."))
 	static void RegisterObservedObject(UObject* ObservedObject);
 
@@ -135,7 +141,7 @@ public:
 
 	DECLARE_FUNCTION(execSetMarkedStruct);
 
-	UFUNCTION(BlueprintCallable, CustomThunk, Category = "Replic", meta = (DefaultToSelf = "ContextObject", ArrayParm = "Value", ArrayTypeDependentParams = "Value", AutoCreateRefTerm = "Value", ToolTip = "Writes a marked array property through Replic.\n\nFlow:\nClient or host -> server -> target actor.\n\nUse this for arrays of Blueprint-supported types or structs that are marked for Replic in the Details panel.\n\n@param ContextObject Object used to identify who is making the request. Usually Self on the calling Character, Pawn, PlayerController, Actor, or Component that has access to a ReplicTransportComponent.\n@param TargetObject Object that owns the marked property. Leave this empty only when the property is on Self.\n@param PropertyName Name of the Replic-marked property on TargetObject.\n@param Value New value that should be written and replicated."))
+	UFUNCTION(BlueprintCallable, CustomThunk, Category = "Replic", meta = (DefaultToSelf = "ContextObject", ArrayParm = "Value", ArrayTypeDependentParams = "Value", AutoCreateRefTerm = "Value", ToolTip = "Legacy generic array writer. Prefer the typed Replic Set Array node created from the variable Details panel; it keeps the array pin stable and is the recommended Blueprint workflow.\n\nFlow:\nClient or host -> server -> target actor.\n\nUse this raw Set Marked Array node only when you specifically need the generic function-call version.\n\n@param ContextObject Object used to identify who is making the request. Usually Self on the calling Character, Pawn, PlayerController, Actor, or Component that has access to a ReplicTransportComponent.\n@param TargetObject Object that owns the marked property. Leave this empty only when the property is on Self.\n@param PropertyName Name of the Replic-marked property on TargetObject.\n@param Value New value that should be written and replicated."))
 	static bool SetMarkedArray(UObject* ContextObject, UObject* TargetObject, UPARAM(meta = (GetOptions = "GetMarkedArrayPropertyOptions")) FName PropertyName, const TArray<int32>& Value);
 
 	DECLARE_FUNCTION(execSetMarkedArray);

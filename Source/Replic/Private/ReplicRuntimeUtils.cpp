@@ -455,7 +455,20 @@ bool ReplicRuntimeUtils::InvokeFunctionBySerializedArguments(UObject* TargetObje
 		if (FProperty* FunctionProperty = FindFProperty<FProperty>(Function, Argument.Name))
 		{
 			void* ValuePtr = FunctionProperty->ContainerPtrToValuePtr<void>(ParameterBuffer.GetData());
-			ImportPropertyValueFromText(FunctionProperty, ValuePtr, Argument.SerializedValue);
+			if (FClassProperty* ClassProperty = CastField<FClassProperty>(FunctionProperty);
+				ClassProperty && Argument.ValueKind == EReplicNamedValueKind::ClassReference)
+			{
+				ClassProperty->SetObjectPropertyValue(ValuePtr, Argument.ClassValue.Get());
+			}
+			else if (FObjectPropertyBase* ObjectProperty = CastField<FObjectPropertyBase>(FunctionProperty);
+				ObjectProperty && Argument.ValueKind == EReplicNamedValueKind::ObjectReference)
+			{
+				ObjectProperty->SetObjectPropertyValue(ValuePtr, Argument.ObjectValue.Get());
+			}
+			else
+			{
+				ImportPropertyValueFromText(FunctionProperty, ValuePtr, Argument.SerializedValue);
+			}
 		}
 	}
 

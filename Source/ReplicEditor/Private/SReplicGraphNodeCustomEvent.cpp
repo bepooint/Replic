@@ -4,6 +4,7 @@
 #include "ReplicMetadata.h"
 #include "Styling/AppStyle.h"
 #include "Widgets/Layout/SBorder.h"
+#include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
 
 #define LOCTEXT_NAMESPACE "SReplicGraphNodeCustomEvent"
@@ -22,10 +23,23 @@ TSharedRef<SWidget> SReplicGraphNodeCustomEvent::CreateTitleRightWidget()
 		.Padding(FMargin(6.0f, 2.0f))
 		.ToolTipText(this, &SReplicGraphNodeCustomEvent::GetReplicBadgeToolTip)
 		[
-			SNew(STextBlock)
-			.Text(this, &SReplicGraphNodeCustomEvent::GetReplicBadgeText)
-			.TextStyle(FAppStyle::Get(), "Graph.Node.NodeTitleExtraLines")
-			.ColorAndOpacity(FLinearColor::White)
+			SNew(SVerticalBox)
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			[
+				SNew(STextBlock)
+				.Text(this, &SReplicGraphNodeCustomEvent::GetReplicBadgeText)
+				.TextStyle(FAppStyle::Get(), "Graph.Node.NodeTitleExtraLines")
+				.ColorAndOpacity(FLinearColor::White)
+			]
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			[
+				SNew(STextBlock)
+				.Text(this, &SReplicGraphNodeCustomEvent::GetReplicPermissionBadgeText)
+				.TextStyle(FAppStyle::Get(), "Graph.Node.NodeTitleExtraLines")
+				.ColorAndOpacity(FLinearColor::White)
+			]
 		];
 }
 
@@ -44,6 +58,13 @@ FText SReplicGraphNodeCustomEvent::GetReplicBadgeText() const
 	return FText::Format(LOCTEXT("ReplicBadgeText", "Replic {0}"), FText::FromString(GetReplicMode()));
 }
 
+FText SReplicGraphNodeCustomEvent::GetReplicPermissionBadgeText() const
+{
+	return IsReplicEnabled()
+		? FText::Format(LOCTEXT("ReplicPermissionBadgeText", "Permission {0}"), FText::FromString(GetReplicPermission()))
+		: FText::GetEmpty();
+}
+
 FText SReplicGraphNodeCustomEvent::GetReplicBadgeToolTip() const
 {
 	if (!IsReplicEnabled())
@@ -52,8 +73,9 @@ FText SReplicGraphNodeCustomEvent::GetReplicBadgeToolTip() const
 	}
 
 	return FText::Format(
-		LOCTEXT("ReplicBadgeToolTip", "Replic is enabled for this custom event.\nDispatch Mode: {0}"),
-		FText::FromString(GetReplicMode()));
+		LOCTEXT("ReplicBadgeToolTip", "Replic is enabled for this custom event.\nDispatch Mode: {0}\nPermission: {1}"),
+		FText::FromString(GetReplicMode()),
+		FText::FromString(GetReplicPermission()));
 }
 
 FSlateColor SReplicGraphNodeCustomEvent::GetReplicBadgeColor() const
@@ -108,6 +130,21 @@ FString SReplicGraphNodeCustomEvent::GetReplicMode() const
 	return Metadata.HasMetaData(ReplicMetadata::EventMode)
 		? Metadata.GetMetaData(ReplicMetadata::EventMode)
 		: TEXT("ReplicateAll");
+}
+
+FString SReplicGraphNodeCustomEvent::GetReplicPermission() const
+{
+	const UK2Node_CustomEvent* EventNode = GetCustomEventNode();
+	if (!EventNode)
+	{
+		return TEXT("None");
+	}
+
+	UK2Node_CustomEvent* MutableEventNode = const_cast<UK2Node_CustomEvent*>(EventNode);
+	const auto& Metadata = MutableEventNode->GetUserDefinedMetaData();
+	return Metadata.HasMetaData(ReplicMetadata::EventPermissionMode)
+		? Metadata.GetMetaData(ReplicMetadata::EventPermissionMode)
+		: TEXT("None");
 }
 
 #undef LOCTEXT_NAMESPACE

@@ -72,7 +72,7 @@ namespace
 		{
 			SharedArrayProperty->SetMetaData(ReplicMetadata::VariableEnabled, TEXT("true"));
 			SharedArrayProperty->SetMetaData(ReplicMetadata::VariablePersistent, TEXT("true"));
-			SharedArrayProperty->SetMetaData(ReplicMetadata::VariablePermissionMode, TEXT("None"));
+			SharedArrayProperty->SetMetaData(ReplicMetadata::VariablePermissionMode, ToMetadataString(VariablePermissionMode));
 		}
 
 		if (FProperty* IntSetStateProperty = FindFProperty<FProperty>(AReplicPIENetworkActor::StaticClass(), GET_MEMBER_NAME_CHECKED(AReplicPIENetworkActor, IntSetState)))
@@ -533,6 +533,122 @@ NETWORK_TEST_CLASS(FReplicPIEContainerDeltaOperationsTest, "Replic.Network.Conta
 	}
 };
 
+NETWORK_TEST_CLASS(FReplicPIENonePermissionTest, "Replic.Network.Permissions.None")
+{
+	FPIENetworkComponent<FReplicPIENetworkState> Network{ TestRunner, TestCommandBuilder, bInitializing };
+
+	BEFORE_EACH()
+	{
+		ConfigureReplicPIENetworkMetadata(EReplicPermissionMode::None, false, EReplicPermissionMode::None, EReplicEventMode::ReplicateAll);
+		BuildListenServerNetwork(Network);
+	}
+
+	TEST_METHOD(ClientPropertyContainerAndEventRequestsAreAccepted)
+	{
+		Network
+			.SpawnAndReplicate<AReplicPIENetworkActor, &FReplicPIENetworkState::SharedActor>()
+			.ThenClient(TEXT("Client sends requests without an additional permission gate"), 0, [this](FReplicPIENetworkState& ClientState)
+			{
+				ASSERT_THAT(IsNotNull(ClientState.SharedActor));
+				APlayerController* ClientController = GetFirstController(ClientState.World);
+				ASSERT_THAT(IsNotNull(ClientController));
+
+				ASSERT_THAT(IsTrue(UReplicLibrary::SetMarkedInt(
+					ClientController,
+					ClientState.SharedActor,
+					GET_MEMBER_NAME_CHECKED(AReplicPIENetworkActor, SharedValue),
+					12)));
+				ASSERT_THAT(IsTrue(RequestIntContainerDelta(
+					ClientController,
+					ClientState.SharedActor,
+					GET_MEMBER_NAME_CHECKED(AReplicPIENetworkActor, SharedArray),
+					EReplicContainerDeltaOperation::AddArrayItem,
+					21)));
+				ASSERT_THAT(IsTrue(UReplicLibrary::CallMarkedEvent(
+					ClientController,
+					ClientState.SharedActor,
+					GET_FUNCTION_NAME_CHECKED(AReplicPIENetworkActor, MarkedPulse),
+					MakePulseArguments(3))));
+			})
+			.UntilServer(TEXT("Server accepts None permission requests"), [](FReplicPIENetworkState& ServerState)
+			{
+				return IsValid(ServerState.SharedActor)
+					&& ServerState.SharedActor->SharedValue == 12
+					&& ServerState.SharedActor->SharedArray == TArray<int32>({ 21 })
+					&& ServerState.SharedActor->EventValue == 3;
+			})
+			.UntilClients(TEXT("Client receives accepted None permission results"), [](FReplicPIENetworkState& ClientState)
+			{
+				return IsValid(ClientState.SharedActor)
+					&& ClientState.SharedActor->SharedValue == 12
+					&& ClientState.SharedActor->SharedArray == TArray<int32>({ 21 })
+					&& ClientState.SharedActor->EventValue == 3;
+			});
+	}
+
+};
+
+NETWORK_TEST_CLASS(FReplicPIEDiagnosticsTest, "Replic.Network.Diagnostics")
+{
+	FPIENetworkComponent<FReplicPIENetworkState> Network{ TestRunner, TestCommandBuilder, bInitializing };
+
+	BEFORE_EACH()
+	{
+		ConfigureReplicPIENetworkMetadata(EReplicPermissionMode::None, true, EReplicPermissionMode::None, EReplicEventMode::ReplicateAll);
+		BuildListenServerNetwork(Network);
+	}
+
+	TEST_METHOD(MarkedPropertySnapshotIncludesPersistentState)
+	{
+		Network
+			.SpawnAndReplicate<AReplicPIENetworkActor, &FReplicPIENetworkState::SharedActor>()
+			.ThenServer(TEXT("Server writes value for diagnostics"), [this](FReplicPIENetworkState& ServerState)
+			{
+				ASSERT_THAT(IsNotNull(ServerState.SharedActor));
+				ASSERT_THAT(IsTrue(UReplicLibrary::HasReplicTransportComponent(ServerState.SharedActor)));
+				APlayerController* ServerController = GetFirstController(ServerState.World);
+				ASSERT_THAT(IsNotNull(ServerController));
+				ASSERT_THAT(IsTrue(UReplicLibrary::SetMarkedInt(
+					ServerController,
+					ServerState.SharedActor,
+					GET_MEMBER_NAME_CHECKED(AReplicPIENetworkActor, SharedValue),
+					73)));
+			})
+			.UntilServer(TEXT("Server persistent diagnostics value is committed"), [](FReplicPIENetworkState& ServerState)
+			{
+				FReplicPropertyDebugInfo DebugInfo;
+				return IsValid(ServerState.SharedActor)
+					&& UReplicLibrary::GetMarkedPropertyDebugInfo(ServerState.SharedActor, GET_MEMBER_NAME_CHECKED(AReplicPIENetworkActor, SharedValue), DebugInfo)
+					&& DebugInfo.bHasPersistentState
+					&& DebugInfo.PersistentValue == TEXT("73");
+			})
+			.UntilClients(TEXT("Clients receive diagnostics value"), [](FReplicPIENetworkState& ClientState)
+			{
+				return IsValid(ClientState.SharedActor) && ClientState.SharedActor->SharedValue == 73;
+			})
+			.ThenServer(TEXT("Server diagnostic snapshot is complete"), [this](FReplicPIENetworkState& ServerState)
+			{
+				FReplicPropertyDebugInfo DebugInfo;
+				ASSERT_THAT(IsTrue(UReplicLibrary::GetMarkedPropertyDebugInfo(ServerState.SharedActor, GET_MEMBER_NAME_CHECKED(AReplicPIENetworkActor, SharedValue), DebugInfo)));
+				ASSERT_THAT(IsTrue(DebugInfo.bTargetResolved));
+				ASSERT_THAT(IsTrue(DebugInfo.bHasReplicTransportComponent));
+				ASSERT_THAT(IsTrue(DebugInfo.bPropertyFound));
+				ASSERT_THAT(IsTrue(DebugInfo.bReplicEnabled));
+				ASSERT_THAT(IsTrue(DebugInfo.bPersistentStateConfigured));
+				ASSERT_THAT(AreEqual(FString(TEXT("73")), DebugInfo.LocalValue));
+				ASSERT_THAT(AreEqual(FString(TEXT("73")), DebugInfo.PersistentValue));
+			})
+			.ThenClients(TEXT("Client diagnostic snapshot resolves locally"), [this](FReplicPIENetworkState& ClientState)
+			{
+				FReplicPropertyDebugInfo DebugInfo;
+				ASSERT_THAT(IsTrue(UReplicLibrary::HasReplicTransportComponent(ClientState.SharedActor)));
+				ASSERT_THAT(IsTrue(UReplicLibrary::GetMarkedPropertyDebugInfo(ClientState.SharedActor, GET_MEMBER_NAME_CHECKED(AReplicPIENetworkActor, SharedValue), DebugInfo)));
+				ASSERT_THAT(IsTrue(DebugInfo.bReplicEnabled));
+				ASSERT_THAT(AreEqual(FString(TEXT("73")), DebugInfo.LocalValue));
+			});
+	}
+};
+
 NETWORK_TEST_CLASS(FReplicPIEOwnerOnlyPermissionTest, "Replic.Network.Permissions.OwnerOnly")
 {
 	FPIENetworkComponent<FReplicPIENetworkState> Network{ TestRunner, TestCommandBuilder, bInitializing };
@@ -558,7 +674,7 @@ NETWORK_TEST_CLASS(FReplicPIEOwnerOnlyPermissionTest, "Replic.Network.Permission
 			{
 				ASSERT_THAT(IsNotNull(ClientState.SharedActor));
 				ASSERT_THAT(IsNotNull(ClientState.ClientOwnedActor));
-				APlayerController* ClientController = GetFirstController(ClientState.World);
+				AReplicPIENetworkPlayerController* ClientController = Cast<AReplicPIENetworkPlayerController>(GetFirstController(ClientState.World));
 				ASSERT_THAT(IsNotNull(ClientController));
 
 				const bool bOwnedWriteAccepted = UReplicLibrary::SetMarkedInt(
@@ -588,24 +704,64 @@ NETWORK_TEST_CLASS(FReplicPIEOwnerOnlyPermissionTest, "Replic.Network.Permission
 					GET_FUNCTION_NAME_CHECKED(AReplicPIENetworkActor, MarkedPulse),
 					MakePulseArguments(9));
 				ASSERT_THAT(IsFalse(bSharedEventAccepted));
+
+				ASSERT_THAT(IsTrue(RequestIntContainerDelta(
+					ClientController,
+					ClientState.ClientOwnedActor,
+					GET_MEMBER_NAME_CHECKED(AReplicPIENetworkActor, SharedArray),
+					EReplicContainerDeltaOperation::AddArrayItem,
+					40)));
+				ASSERT_THAT(IsFalse(RequestIntContainerDelta(
+					ClientController,
+					ClientState.SharedActor,
+					GET_MEMBER_NAME_CHECKED(AReplicPIENetworkActor, SharedArray),
+					EReplicContainerDeltaOperation::AddArrayItem,
+					99)));
+
+				ASSERT_THAT(IsNotNull(ClientController->ReplicTransportComponent));
+				ClientController->ReplicTransportComponent->SendUncheckedPropertyRequest(
+					ClientState.SharedActor,
+					GET_MEMBER_NAME_CHECKED(AReplicPIENetworkActor, SharedValue),
+					TEXT("98"));
+				ClientController->ReplicTransportComponent->SendUncheckedContainerRequest(
+					ClientState.SharedActor,
+					GET_MEMBER_NAME_CHECKED(AReplicPIENetworkActor, SharedArray),
+					EReplicContainerDeltaOperation::AddArrayItem,
+					TEXT("98"));
+				ClientController->ReplicTransportComponent->SendUncheckedEventRequest(
+					ClientState.SharedActor,
+					GET_FUNCTION_NAME_CHECKED(AReplicPIENetworkActor, MarkedPulse),
+					MakePulseArguments(98));
+
+				ASSERT_THAT(IsTrue(UReplicLibrary::SetMarkedInt(
+					ClientController,
+					ClientState.SharedActor,
+					GET_MEMBER_NAME_CHECKED(AReplicPIENetworkActor, BatchedValue),
+					101)));
 			})
 			.UntilServer(TEXT("Server observes owner-only results"), [](FReplicPIENetworkState& ServerState)
 			{
 				return IsValid(ServerState.SharedActor)
 					&& IsValid(ServerState.ClientOwnedActor)
+					&& ServerState.SharedActor->BatchedValue == 101
 					&& ServerState.SharedActor->SharedValue == 0
 					&& ServerState.SharedActor->EventValue == 0
+					&& ServerState.SharedActor->SharedArray.IsEmpty()
 					&& ServerState.ClientOwnedActor->SharedValue == 10
-					&& ServerState.ClientOwnedActor->EventValue == 4;
+					&& ServerState.ClientOwnedActor->EventValue == 4
+					&& ServerState.ClientOwnedActor->SharedArray == TArray<int32>({ 40 });
 			})
 			.UntilClients(TEXT("Client observes owner-only results"), [](FReplicPIENetworkState& ClientState)
 			{
 				return IsValid(ClientState.SharedActor)
 					&& IsValid(ClientState.ClientOwnedActor)
+					&& ClientState.SharedActor->BatchedValue == 101
 					&& ClientState.SharedActor->SharedValue == 0
 					&& ClientState.SharedActor->EventValue == 0
+					&& ClientState.SharedActor->SharedArray.IsEmpty()
 					&& ClientState.ClientOwnedActor->SharedValue == 10
-					&& ClientState.ClientOwnedActor->EventValue == 4;
+					&& ClientState.ClientOwnedActor->EventValue == 4
+					&& ClientState.ClientOwnedActor->SharedArray == TArray<int32>({ 40 });
 			});
 	}
 };
@@ -627,7 +783,7 @@ NETWORK_TEST_CLASS(FReplicPIEServerOnlyPermissionTest, "Replic.Network.Permissio
 			.ThenClient(TEXT("Client requests are denied in ServerOnly mode"), 0, [this](FReplicPIENetworkState& ClientState)
 			{
 				ASSERT_THAT(IsNotNull(ClientState.SharedActor));
-				APlayerController* ClientController = GetFirstController(ClientState.World);
+				AReplicPIENetworkPlayerController* ClientController = Cast<AReplicPIENetworkPlayerController>(GetFirstController(ClientState.World));
 				ASSERT_THAT(IsNotNull(ClientController));
 
 				const bool bWriteAccepted = UReplicLibrary::SetMarkedInt(
@@ -643,18 +799,50 @@ NETWORK_TEST_CLASS(FReplicPIEServerOnlyPermissionTest, "Replic.Network.Permissio
 					GET_FUNCTION_NAME_CHECKED(AReplicPIENetworkActor, MarkedPulse),
 					MakePulseArguments(6));
 				ASSERT_THAT(IsFalse(bEventAccepted));
+
+				ASSERT_THAT(IsFalse(RequestIntContainerDelta(
+					ClientController,
+					ClientState.SharedActor,
+					GET_MEMBER_NAME_CHECKED(AReplicPIENetworkActor, SharedArray),
+					EReplicContainerDeltaOperation::AddArrayItem,
+					15)));
+
+				ASSERT_THAT(IsNotNull(ClientController->ReplicTransportComponent));
+				ClientController->ReplicTransportComponent->SendUncheckedPropertyRequest(
+					ClientState.SharedActor,
+					GET_MEMBER_NAME_CHECKED(AReplicPIENetworkActor, SharedValue),
+					TEXT("16"));
+				ClientController->ReplicTransportComponent->SendUncheckedContainerRequest(
+					ClientState.SharedActor,
+					GET_MEMBER_NAME_CHECKED(AReplicPIENetworkActor, SharedArray),
+					EReplicContainerDeltaOperation::AddArrayItem,
+					TEXT("16"));
+				ClientController->ReplicTransportComponent->SendUncheckedEventRequest(
+					ClientState.SharedActor,
+					GET_FUNCTION_NAME_CHECKED(AReplicPIENetworkActor, MarkedPulse),
+					MakePulseArguments(16));
+
+				ASSERT_THAT(IsTrue(UReplicLibrary::SetMarkedInt(
+					ClientController,
+					ClientState.SharedActor,
+					GET_MEMBER_NAME_CHECKED(AReplicPIENetworkActor, BatchedValue),
+					201)));
 			})
 			.UntilServer(TEXT("Denied client requests leave server state unchanged"), [](FReplicPIENetworkState& ServerState)
 			{
 				return IsValid(ServerState.SharedActor)
+					&& ServerState.SharedActor->BatchedValue == 201
 					&& ServerState.SharedActor->SharedValue == 0
-					&& ServerState.SharedActor->EventValue == 0;
+					&& ServerState.SharedActor->EventValue == 0
+					&& ServerState.SharedActor->SharedArray.IsEmpty();
 			})
 			.UntilClients(TEXT("Denied client requests leave client state unchanged"), [](FReplicPIENetworkState& ClientState)
 			{
 				return IsValid(ClientState.SharedActor)
+					&& ClientState.SharedActor->BatchedValue == 201
 					&& ClientState.SharedActor->SharedValue == 0
-					&& ClientState.SharedActor->EventValue == 0;
+					&& ClientState.SharedActor->EventValue == 0
+					&& ClientState.SharedActor->SharedArray.IsEmpty();
 			})
 			.ThenServer(TEXT("Server requests still apply in ServerOnly mode"), [this](FReplicPIENetworkState& ServerState)
 			{
@@ -675,18 +863,27 @@ NETWORK_TEST_CLASS(FReplicPIEServerOnlyPermissionTest, "Replic.Network.Permissio
 					GET_FUNCTION_NAME_CHECKED(AReplicPIENetworkActor, MarkedPulse),
 					MakePulseArguments(7));
 				ASSERT_THAT(IsTrue(bEventAccepted));
+
+				ASSERT_THAT(IsTrue(RequestIntContainerDelta(
+					ServerController,
+					ServerState.SharedActor,
+					GET_MEMBER_NAME_CHECKED(AReplicPIENetworkActor, SharedArray),
+					EReplicContainerDeltaOperation::AddArrayItem,
+					50)));
 			})
 			.UntilServer(TEXT("Server observes allowed ServerOnly results"), [](FReplicPIENetworkState& ServerState)
 			{
 				return IsValid(ServerState.SharedActor)
 					&& ServerState.SharedActor->SharedValue == 25
-					&& ServerState.SharedActor->EventValue == 7;
+					&& ServerState.SharedActor->EventValue == 7
+					&& ServerState.SharedActor->SharedArray == TArray<int32>({ 50 });
 			})
 			.UntilClients(TEXT("Client observes allowed ServerOnly results"), [](FReplicPIENetworkState& ClientState)
 			{
 				return IsValid(ClientState.SharedActor)
 					&& ClientState.SharedActor->SharedValue == 25
-					&& ClientState.SharedActor->EventValue == 7;
+					&& ClientState.SharedActor->EventValue == 7
+					&& ClientState.SharedActor->SharedArray == TArray<int32>({ 50 });
 			});
 	}
 };
@@ -705,7 +902,7 @@ NETWORK_TEST_CLASS(FReplicPIECustomPermissionTest, "Replic.Network.Permissions.C
 	{
 		Network
 			.SpawnAndReplicate<AReplicPIENetworkActor, &FReplicPIENetworkState::SharedActor>()
-			.ThenClient(TEXT("Client requests are denied while custom validation is false"), 0, [this](FReplicPIENetworkState& ClientState)
+			.ThenClient(TEXT("Client queues requests for authoritative custom validation"), 0, [this](FReplicPIENetworkState& ClientState)
 			{
 				ASSERT_THAT(IsNotNull(ClientState.SharedActor));
 				APlayerController* ClientController = GetFirstController(ClientState.World);
@@ -715,21 +912,36 @@ NETWORK_TEST_CLASS(FReplicPIECustomPermissionTest, "Replic.Network.Permissions.C
 					ClientController,
 					ClientState.SharedActor,
 					GET_MEMBER_NAME_CHECKED(AReplicPIENetworkActor, SharedValue),
-					30);
-				ASSERT_THAT(IsFalse(bWriteAccepted));
+					31);
+				ASSERT_THAT(IsTrue(bWriteAccepted));
 
 				const bool bEventAccepted = UReplicLibrary::CallMarkedEvent(
 					ClientController,
 					ClientState.SharedActor,
 					GET_FUNCTION_NAME_CHECKED(AReplicPIENetworkActor, MarkedPulse),
-					MakePulseArguments(8));
-				ASSERT_THAT(IsFalse(bEventAccepted));
+					MakePulseArguments(9));
+				ASSERT_THAT(IsTrue(bEventAccepted));
+
+				ASSERT_THAT(IsTrue(RequestIntContainerDelta(
+					ClientController,
+					ClientState.SharedActor,
+					GET_MEMBER_NAME_CHECKED(AReplicPIENetworkActor, SharedArray),
+					EReplicContainerDeltaOperation::AddArrayItem,
+					61)));
+
+				ASSERT_THAT(IsTrue(UReplicLibrary::SetMarkedInt(
+					ClientController,
+					ClientState.SharedActor,
+					GET_MEMBER_NAME_CHECKED(AReplicPIENetworkActor, BatchedValue),
+					301)));
 			})
 			.UntilServer(TEXT("Denied custom requests leave server state unchanged"), [](FReplicPIENetworkState& ServerState)
 			{
 				return IsValid(ServerState.SharedActor)
+					&& ServerState.SharedActor->BatchedValue == 301
 					&& ServerState.SharedActor->SharedValue == 0
-					&& ServerState.SharedActor->EventValue == 0;
+					&& ServerState.SharedActor->EventValue == 0
+					&& ServerState.SharedActor->SharedArray.IsEmpty();
 			})
 			.ThenServer(TEXT("Server enables custom validation"), [this](FReplicPIENetworkState& ServerState)
 			{
@@ -737,19 +949,13 @@ NETWORK_TEST_CLASS(FReplicPIECustomPermissionTest, "Replic.Network.Permissions.C
 				ServerState.SharedActor->bAllowCustomWrite = true;
 				ServerState.SharedActor->bAllowCustomEvent = true;
 			})
-			.ThenClients(TEXT("Clients mirror custom validation toggles"), [](FReplicPIENetworkState& ClientState)
-			{
-				if (IsValid(ClientState.SharedActor))
-				{
-					ClientState.SharedActor->bAllowCustomWrite = true;
-					ClientState.SharedActor->bAllowCustomEvent = true;
-				}
-			})
-			.ThenClient(TEXT("Client requests succeed once custom validation is enabled"), 0, [this](FReplicPIENetworkState& ClientState)
+			.ThenClient(TEXT("Client requests succeed using server-only validation state"), 0, [this](FReplicPIENetworkState& ClientState)
 			{
 				ASSERT_THAT(IsNotNull(ClientState.SharedActor));
 				APlayerController* ClientController = GetFirstController(ClientState.World);
 				ASSERT_THAT(IsNotNull(ClientController));
+				ASSERT_THAT(IsFalse(ClientState.SharedActor->bAllowCustomWrite));
+				ASSERT_THAT(IsFalse(ClientState.SharedActor->bAllowCustomEvent));
 
 				const bool bWriteAccepted = UReplicLibrary::SetMarkedInt(
 					ClientController,
@@ -764,18 +970,35 @@ NETWORK_TEST_CLASS(FReplicPIECustomPermissionTest, "Replic.Network.Permissions.C
 					GET_FUNCTION_NAME_CHECKED(AReplicPIENetworkActor, MarkedPulse),
 					MakePulseArguments(8));
 				ASSERT_THAT(IsTrue(bEventAccepted));
+
+				ASSERT_THAT(IsTrue(RequestIntContainerDelta(
+					ClientController,
+					ClientState.SharedActor,
+					GET_MEMBER_NAME_CHECKED(AReplicPIENetworkActor, SharedArray),
+					EReplicContainerDeltaOperation::AddArrayItem,
+					60)));
+
+				ASSERT_THAT(IsTrue(UReplicLibrary::SetMarkedInt(
+					ClientController,
+					ClientState.SharedActor,
+					GET_MEMBER_NAME_CHECKED(AReplicPIENetworkActor, BatchedValue),
+					302)));
 			})
 			.UntilServer(TEXT("Server observes allowed custom results"), [](FReplicPIENetworkState& ServerState)
 			{
 				return IsValid(ServerState.SharedActor)
+					&& ServerState.SharedActor->BatchedValue == 302
 					&& ServerState.SharedActor->SharedValue == 30
-					&& ServerState.SharedActor->EventValue == 8;
+					&& ServerState.SharedActor->EventValue == 8
+					&& ServerState.SharedActor->SharedArray == TArray<int32>({ 60 });
 			})
 			.UntilClients(TEXT("Client observes allowed custom results"), [](FReplicPIENetworkState& ClientState)
 			{
 				return IsValid(ClientState.SharedActor)
+					&& ClientState.SharedActor->BatchedValue == 302
 					&& ClientState.SharedActor->SharedValue == 30
-					&& ClientState.SharedActor->EventValue == 8;
+					&& ClientState.SharedActor->EventValue == 8
+					&& ClientState.SharedActor->SharedArray == TArray<int32>({ 60 });
 			});
 	}
 };

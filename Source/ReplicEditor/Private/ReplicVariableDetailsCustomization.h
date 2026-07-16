@@ -34,5 +34,6 @@ private:
 	TWeakPtr<FBlueprintEditor> BlueprintEditor;
 	TWeakObjectPtr<UBlueprint> Blueprint;
 	FName VariableName = NAME_None;
+	TOptional<float> PendingBatchInterval;
 	TArray<TSharedPtr<FString>> PermissionOptions;
 };

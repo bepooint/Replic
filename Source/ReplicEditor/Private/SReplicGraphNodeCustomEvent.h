@@ -19,9 +19,11 @@ protected:
 private:
 	EVisibility GetReplicBadgeVisibility() const;
 	FText GetReplicBadgeText() const;
+	FText GetReplicPermissionBadgeText() const;
 	FText GetReplicBadgeToolTip() const;
 	FSlateColor GetReplicBadgeColor() const;
 	const UK2Node_CustomEvent* GetCustomEventNode() const;
 	bool IsReplicEnabled() const;
 	FString GetReplicMode() const;
+	FString GetReplicPermission() const;
 };

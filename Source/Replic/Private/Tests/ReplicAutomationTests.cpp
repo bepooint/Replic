@@ -5,6 +5,7 @@
 #include "ReplicLibrary.h"
 #include "ReplicMetadata.h"
 #include "ReplicRuntimeUtils.h"
+#include "ReplicSettings.h"
 #include "ReplicTypes.h"
 #include "Tests/ReplicAutomationTestObject.h"
 #include "Components/SceneComponent.h"
@@ -81,6 +82,31 @@ namespace
 		Test.TestTrue(TEXT("Export property to text"), ReplicRuntimeUtils::ExportObjectPropertyToText(Object, Property, TextValue));
 		return TextValue;
 	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FReplicDiagnosticsSettingsAutomationTest,
+	"Replic.Runtime.Diagnostics.SettingsDefaults",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FReplicDiagnosticsSettingsAutomationTest::RunTest(const FString& Parameters)
+{
+	const UReplicSettings* Settings = GetDefault<UReplicSettings>();
+	TestNotNull(TEXT("Replic settings exist"), Settings);
+	if (!Settings)
+	{
+		return false;
+	}
+
+	TestFalse(TEXT("Runtime debug logs are quiet by default"), Settings->bEnableRuntimeDebugLogs);
+	TestFalse(TEXT("Verbose routine logs are quiet by default"), Settings->bEnableVerboseRuntimeLogs);
+	TestFalse(TEXT("Screen debug messages are quiet by default"), Settings->bEnableScreenDebugMessages);
+	TestTrue(TEXT("Write diagnostics channel is ready when logging is enabled"), Settings->bEnableWriteDebugLogs);
+	TestTrue(TEXT("Event diagnostics channel is ready when logging is enabled"), Settings->bEnableEventDebugLogs);
+	TestTrue(TEXT("State diagnostics channel is ready when logging is enabled"), Settings->bEnableStateDebugLogs);
+	TestTrue(TEXT("Permission diagnostics channel is ready when logging is enabled"), Settings->bEnableDetailedPermissionLogs);
+	TestFalse(TEXT("Observer diagnostics remain opt-in"), Settings->bEnableObserverDebugLogs);
+	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -292,6 +318,17 @@ bool FReplicInvokeEventAutomationTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Event array size applied"), TestObject->LastEventValues.Num(), 3);
 	TestEqual(TEXT("Event array first value applied"), TestObject->LastEventValues[0], 4);
 	TestEqual(TEXT("Event array last value applied"), TestObject->LastEventValues[2], 6);
+
+	UReplicAutomationHelperObject* ReferencedObject = NewObject<UReplicAutomationHelperObject>(TestObject);
+	UFunction* ReferenceEventFunction = TestClass->FindFunctionByName(GET_FUNCTION_NAME_CHECKED(UReplicAutomationTestObject, MarkedReferenceEvent));
+	TestNotNull(TEXT("MarkedReferenceEvent function exists"), ReferenceEventFunction);
+
+	TArray<FReplicNamedValue> ReferenceArguments;
+	ReferenceArguments.Add(UReplicLibrary::MakeNamedObjectValue(TEXT("ObjectValue"), ReferencedObject));
+	ReferenceArguments.Add(UReplicLibrary::MakeNamedClassValue(TEXT("ClassValue"), AActor::StaticClass()));
+	TestTrue(TEXT("Native object and class arguments invoke successfully"), ReplicRuntimeUtils::InvokeFunctionBySerializedArguments(TestObject, ReferenceEventFunction, ReferenceArguments));
+	TestTrue(TEXT("Native object argument is preserved"), TestObject->LastEventObject == ReferencedObject);
+	TestEqual(TEXT("Native class argument is preserved"), TestObject->LastEventClass.Get(), AActor::StaticClass());
 
 	return true;
 }

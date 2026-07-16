@@ -6,6 +6,7 @@
 #include "ReplicPropertyObserver.generated.h"
 
 class UReplicTransportComponent;
+class AActor;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FReplicObservedPropertyChangedSignature, UObject*, TargetObject, FName, PropertyName);
 
@@ -20,6 +21,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Replic|Observe", meta = (ToolTip = "Stops this Replic property observer and removes its internal binding from the transport component."))
 	void Unbind();
 
+	UFUNCTION(BlueprintPure, Category = "Replic|Observe", meta = (ToolTip = "Returns true while this observer is still bound to a valid Replic target and transport component."))
+	bool IsBound() const;
+
 	UPROPERTY(BlueprintAssignable, Category = "Replic|Observe", meta = (ToolTip = "Fires when Replic applies a different value to the observed target/property on this machine.\n\nIf PropertyName was left empty when binding, this fires for any marked property on the observed target object."))
 	FReplicObservedPropertyChangedSignature OnChanged;
 
@@ -30,11 +34,17 @@ private:
 	UFUNCTION()
 	void HandleTransportPropertyChanged(UObject* ChangedTargetObject, FName ChangedPropertyName);
 
-	UPROPERTY(Transient)
-	TObjectPtr<UReplicTransportComponent> TransportComponent;
+	UFUNCTION()
+	void HandleHostActorDestroyed(AActor* DestroyedActor);
 
 	UPROPERTY(Transient)
-	TObjectPtr<UObject> TargetObject;
+	TWeakObjectPtr<UReplicTransportComponent> TransportComponent;
+
+	UPROPERTY(Transient)
+	TWeakObjectPtr<UObject> TargetObject;
+
+	UPROPERTY(Transient)
+	TWeakObjectPtr<AActor> HostActor;
 
 	UPROPERTY(Transient)
 	FName PropertyName = NAME_None;

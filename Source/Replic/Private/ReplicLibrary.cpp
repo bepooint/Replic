@@ -3,6 +3,7 @@
 #include "ReplicPropertyObserver.h"
 #include "ReplicRuntimeUtils.h"
 #include "ReplicTransportComponent.h"
+#include "GameFramework/Actor.h"
 #include "Templates/SubclassOf.h"
 #include "UObject/TextProperty.h"
 #include "UObject/UObjectIterator.h"
@@ -127,6 +128,75 @@ namespace
 		SortedOptions.Sort();
 		return SortedOptions;
 	}
+}
+
+bool UReplicLibrary::HasReplicTransportComponent(UObject* TargetObject)
+{
+	FReplicResolvedTarget ResolvedTarget;
+	return ReplicRuntimeUtils::ResolveTarget(TargetObject, ResolvedTarget)
+		&& ResolvedTarget.HostActor
+		&& UReplicTransportComponent::FindOnActor(ResolvedTarget.HostActor) != nullptr;
+}
+
+bool UReplicLibrary::GetMarkedPropertyDebugInfo(UObject* TargetObject, FName PropertyName, FReplicPropertyDebugInfo& DebugInfo)
+{
+	DebugInfo = FReplicPropertyDebugInfo();
+	DebugInfo.TargetPath = GetPathNameSafe(TargetObject);
+	DebugInfo.PropertyName = PropertyName;
+
+	if (!TargetObject)
+	{
+		DebugInfo.DiagnosticMessage = TEXT("Target Object is null.");
+		return false;
+	}
+
+	FReplicResolvedTarget ResolvedTarget;
+	if (!ReplicRuntimeUtils::ResolveTarget(TargetObject, ResolvedTarget) || !ResolvedTarget.HostActor)
+	{
+		DebugInfo.DiagnosticMessage = TEXT("Target Object cannot be resolved to a Replic host actor.");
+		return false;
+	}
+
+	DebugInfo.bTargetResolved = true;
+	const UReplicTransportComponent* Transport = UReplicTransportComponent::FindOnActor(ResolvedTarget.HostActor);
+	DebugInfo.bHasReplicTransportComponent = Transport != nullptr;
+
+	FProperty* Property = ReplicRuntimeUtils::FindPropertyByName(TargetObject, PropertyName);
+	if (!Property)
+	{
+		DebugInfo.DiagnosticMessage = FString::Printf(TEXT("Property '%s' was not found on the target object."), *PropertyName.ToString());
+		return false;
+	}
+
+	DebugInfo.bPropertyFound = true;
+	DebugInfo.PropertyType = Property->GetCPPType();
+	ReplicRuntimeUtils::ExportObjectPropertyToText(TargetObject, Property, DebugInfo.LocalValue);
+
+	FReplicVariableSettings VariableSettings;
+	if (!ReplicRuntimeUtils::TryGetVariableSettings(TargetObject, PropertyName, VariableSettings))
+	{
+		DebugInfo.DiagnosticMessage = FString::Printf(TEXT("Property '%s' exists but is not enabled for Replic."), *PropertyName.ToString());
+		return false;
+	}
+
+	DebugInfo.bReplicEnabled = true;
+	DebugInfo.PermissionMode = VariableSettings.PermissionMode;
+	DebugInfo.bPersistentStateConfigured = VariableSettings.bPersistentState;
+	DebugInfo.bUseBatching = VariableSettings.bUseBatching;
+	DebugInfo.BatchIntervalSeconds = VariableSettings.BatchIntervalSeconds;
+
+	if (Transport)
+	{
+		DebugInfo.bHasPersistentState = Transport->TryGetPersistentStateDebugValue(
+			ResolvedTarget.Descriptor,
+			PropertyName,
+			DebugInfo.PersistentValue);
+	}
+
+	DebugInfo.DiagnosticMessage = Transport
+		? TEXT("Marked property diagnostics resolved successfully.")
+		: TEXT("Marked property is valid, but the host actor has no ReplicTransportComponent.");
+	return Transport != nullptr;
 }
 
 void UReplicLibrary::RegisterObservedObject(UObject* ObservedObject)
@@ -1205,12 +1275,22 @@ FReplicNamedValue UReplicLibrary::MakeNamedTransformValue(FName Name, FTransform
 
 FReplicNamedValue UReplicLibrary::MakeNamedObjectValue(FName Name, UObject* Value)
 {
-	return MakeSerializedNamedValue(Name, Value, [](const UObject* TypedValue) { return GetPathNameSafe(TypedValue); });
+	FReplicNamedValue NamedValue;
+	NamedValue.Name = Name;
+	NamedValue.SerializedValue = GetPathNameSafe(Value);
+	NamedValue.ValueKind = EReplicNamedValueKind::ObjectReference;
+	NamedValue.ObjectValue = Value;
+	return NamedValue;
 }
 
 FReplicNamedValue UReplicLibrary::MakeNamedClassValue(FName Name, TSubclassOf<UObject> Value)
 {
-	return MakeSerializedNamedValue(Name, Value, [](const TSubclassOf<UObject>& TypedValue) { return GetPathNameSafe(TypedValue.Get()); });
+	FReplicNamedValue NamedValue;
+	NamedValue.Name = Name;
+	NamedValue.SerializedValue = GetPathNameSafe(Value.Get());
+	NamedValue.ValueKind = EReplicNamedValueKind::ClassReference;
+	NamedValue.ClassValue = Value;
+	return NamedValue;
 }
 
 TArray<FString> UReplicLibrary::GetMarkedBoolPropertyOptions()

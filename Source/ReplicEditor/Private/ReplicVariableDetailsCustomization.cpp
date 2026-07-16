@@ -1,4 +1,4 @@
-#include "ReplicVariableDetailsCustomization.h"
+﻿#include "ReplicVariableDetailsCustomization.h"
 
 #include "BlueprintEditor.h"
 #include "DetailCategoryBuilder.h"
@@ -19,6 +19,7 @@
 #include "ReplicLibrary.h"
 #include "ReplicMetadata.h"
 #include "ReplicSettings.h"
+#include "ScopedTransaction.h"
 #include "SMyBlueprint.h"
 #include "UObject/UnrealType.h"
 #include "Widgets/Input/SButton.h"
@@ -46,7 +47,32 @@ namespace
 		return false;
 	}
 
-	const FText ReplicateAllTooltip = LOCTEXT("ReplicateAllTooltip", "Enables Replic handling for this variable.\n\nWrites made through Replic setter nodes are sent to the server and then distributed using this variable's Replic settings.");
+	FString GetReadablePropertyTypeName(const FProperty* Property)
+	{
+		if (!Property)
+		{
+			return TEXT("Unknown");
+		}
+
+		if (const FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Property))
+		{
+			return FString::Printf(TEXT("Array of %s"), *GetReadablePropertyTypeName(ArrayProperty->Inner));
+		}
+
+		if (const FSetProperty* SetProperty = CastField<FSetProperty>(Property))
+		{
+			return FString::Printf(TEXT("Set of %s"), *GetReadablePropertyTypeName(SetProperty->ElementProp));
+		}
+
+		if (const FMapProperty* MapProperty = CastField<FMapProperty>(Property))
+		{
+			return FString::Printf(TEXT("Map of %s to %s"), *GetReadablePropertyTypeName(MapProperty->KeyProp), *GetReadablePropertyTypeName(MapProperty->ValueProp));
+		}
+
+		return Property->GetCPPType();
+	}
+
+	const FText EnableReplicTooltip = LOCTEXT("EnableReplicTooltip", "Enables Replic for this variable.\n\nThis does not use Unreal RepNotify or normal Blueprint variable replication. Values are replicated when you write them through Replic setter nodes such as Set Marked Int or Replic Set Array.\n\nUse Persistent State if late joiners should receive the latest value.");
 	const FText PersistentStateTooltip = LOCTEXT("PersistentStateTooltip", "Stores this variable as persistent replicated state.\n\nLate joiners receive the latest stored value when they connect.");
 	const FText UseBatchingTooltip = LOCTEXT("UseBatchingTooltip", "Queues repeated writes for this variable.\n\nReplic sends the latest value after a short delay instead of sending every single change immediately.");
 	const FText BatchIntervalTooltip = LOCTEXT("BatchIntervalTooltip", "Defines how long Replic waits before flushing a batched write.\n\nLower values update sooner.\nHigher values reduce network spam.");
@@ -414,6 +440,9 @@ void FReplicVariableDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
 
 	VariableName = VariableAction->GetVariableName();
 	const FProperty* VariableProperty = ResolveBlueprintVariableProperty(Blueprint.Get(), VariableName);
+	const bool bHasReplicSetter = ResolveSetterFunctionForProperty(VariableProperty) != nullptr;
+	const bool bHasReplicGetter = ResolveGetterFunctionForProperty(VariableProperty) != nullptr;
+	const FText UnsupportedReplicPropertyTooltip = FText::Format(LOCTEXT("UnsupportedReplicPropertyTooltip", "Replic does not have a Blueprint node workflow for this variable type yet. Variable type: {0}. Use a supported Replic type, wrap the value in a supported struct, or keep this variable outside Replic for now."), FText::FromString(GetReadablePropertyTypeName(VariableProperty)));
 	const FString CurrentPermissionMode = GetStringMetadata(ReplicMetadata::VariablePermissionMode, TEXT("None"));
 	TSharedPtr<FString>* FoundPermissionMode = PermissionOptions.FindByPredicate([&CurrentPermissionMode](const TSharedPtr<FString>& Item)
 	{
@@ -422,17 +451,17 @@ void FReplicVariableDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
 	TSharedPtr<FString> InitialPermissionMode = FoundPermissionMode ? *FoundPermissionMode : PermissionOptions[0];
 
 	IDetailCategoryBuilder& Category = DetailLayout.EditCategory(TEXT("Replic"), LOCTEXT("ReplicCategory", "Replic"));
-	Category.AddCustomRow(LOCTEXT("ReplicateAll", "Replicate All"))
+	Category.AddCustomRow(LOCTEXT("EnableReplic", "Enable Replic"))
 	.NameContent()
 	[
 		SNew(STextBlock)
-		.Text(LOCTEXT("ReplicateAllLabel", "Replicate All"))
-		.ToolTipText(ReplicateAllTooltip)
+		.Text(LOCTEXT("EnableReplicLabel", "Enable Replic"))
+		.ToolTipText(EnableReplicTooltip)
 	]
 	.ValueContent()
 	[
 		SNew(SCheckBox)
-		.ToolTipText(ReplicateAllTooltip)
+		.ToolTipText(EnableReplicTooltip)
 		.IsChecked_Lambda([this]()
 		{
 			return GetBoolMetadata(ReplicMetadata::VariableEnabled, false) ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
@@ -509,12 +538,24 @@ void FReplicVariableDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
 			return GetBoolMetadata(ReplicMetadata::VariableEnabled, false) && GetBoolMetadata(ReplicMetadata::VariableBatching, false);
 		})
 		.MinValue(0.0f)
-		.Value_Lambda([this]()
+		.Value_Lambda([this]() -> TOptional<float>
 		{
-			return GetFloatMetadata(ReplicMetadata::VariableBatchInterval, GetDefault<UReplicSettings>()->DefaultBatchIntervalSeconds);
+			return PendingBatchInterval.IsSet()
+				? PendingBatchInterval
+				: TOptional<float>(GetFloatMetadata(ReplicMetadata::VariableBatchInterval, GetDefault<UReplicSettings>()->DefaultBatchIntervalSeconds));
+		})
+		.OnValueChanged_Lambda([this](float NewValue)
+		{
+			PendingBatchInterval = NewValue;
 		})
 		.OnValueCommitted_Lambda([this](float NewValue, ETextCommit::Type)
 		{
+			PendingBatchInterval = NewValue;
+			SetFloatMetadata(ReplicMetadata::VariableBatchInterval, NewValue);
+		})
+		.OnEndSliderMovement_Lambda([this](float NewValue)
+		{
+			PendingBatchInterval = NewValue;
 			SetFloatMetadata(ReplicMetadata::VariableBatchInterval, NewValue);
 		})
 	];
@@ -557,12 +598,25 @@ void FReplicVariableDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
 		})
 	];
 
+	if (!bHasReplicSetter || !bHasReplicGetter)
+	{
+		Category.AddCustomRow(LOCTEXT("UnsupportedReplicProperty", "Unsupported Replic Property"))
+		.WholeRowContent()
+		[
+			SNew(STextBlock)
+			.Text(UnsupportedReplicPropertyTooltip)
+			.ToolTipText(UnsupportedReplicPropertyTooltip)
+			.AutoWrapText(true)
+		];
+	}
+
 	Category.AddCustomRow(LOCTEXT("CreateReplicSetter", "Create Replic Setter"))
 	.WholeRowContent()
 	[
 		SNew(SButton)
 		.Text(LOCTEXT("CreateReplicSetterLabel", "Create Replic Setter Node"))
-		.ToolTipText(LOCTEXT("CreateReplicSetterTooltip", "Adds the matching typed Replic setter node for this variable to the currently focused graph."))
+		.ToolTipText(bHasReplicSetter ? LOCTEXT("CreateReplicSetterTooltip", "Adds the matching typed Replic setter node for this variable to the currently focused graph.") : UnsupportedReplicPropertyTooltip)
+		.IsEnabled(bHasReplicSetter)
 		.OnClicked_Lambda([this]()
 		{
 			return CreateReplicSetterNode();
@@ -574,7 +628,8 @@ void FReplicVariableDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder&
 	[
 		SNew(SButton)
 		.Text(LOCTEXT("CreateReplicGetterLabel", "Create Replic Getter Node"))
-		.ToolTipText(LOCTEXT("CreateReplicGetterTooltip", "Adds the matching typed Replic getter node for this variable to the currently focused graph."))
+		.ToolTipText(bHasReplicGetter ? LOCTEXT("CreateReplicGetterTooltip", "Adds the matching typed Replic getter node for this variable to the currently focused graph.") : UnsupportedReplicPropertyTooltip)
+		.IsEnabled(bHasReplicGetter)
 		.OnClicked_Lambda([this]()
 		{
 			return CreateReplicGetterNode();
@@ -942,9 +997,22 @@ void FReplicVariableDetailsCustomization::SetBoolMetadata(const FName& Key, bool
 		return;
 	}
 
+	const bool bDefaultValue = Key == ReplicMetadata::VariablePersistent;
+	if (GetBoolMetadata(Key, bDefaultValue) == bEnabled)
+	{
+		return;
+	}
+
+	const FScopedTransaction Transaction(LOCTEXT("SetReplicVariableBoolMetadata", "Change Replic Variable Setting"));
+	Blueprint->Modify();
+
 	if (bEnabled)
 	{
 		FBlueprintEditorUtils::SetBlueprintVariableMetaData(Blueprint.Get(), VariableName, nullptr, Key, TEXT("true"));
+	}
+	else if (Key == ReplicMetadata::VariablePersistent)
+	{
+		FBlueprintEditorUtils::SetBlueprintVariableMetaData(Blueprint.Get(), VariableName, nullptr, Key, TEXT("false"));
 	}
 	else
 	{
@@ -961,6 +1029,15 @@ void FReplicVariableDetailsCustomization::SetFloatMetadata(const FName& Key, flo
 		return;
 	}
 
+	FString ExistingValue;
+	if (FBlueprintEditorUtils::GetBlueprintVariableMetaData(Blueprint.Get(), VariableName, nullptr, Key, ExistingValue)
+		&& FMath::IsNearlyEqual(FCString::Atof(*ExistingValue), Value))
+	{
+		return;
+	}
+
+	const FScopedTransaction Transaction(LOCTEXT("SetReplicVariableFloatMetadata", "Change Replic Variable Setting"));
+	Blueprint->Modify();
 	FBlueprintEditorUtils::SetBlueprintVariableMetaData(Blueprint.Get(), VariableName, nullptr, Key, LexToString(Value));
 	RefreshBlueprint();
 }
@@ -972,6 +1049,13 @@ void FReplicVariableDetailsCustomization::SetStringMetadata(const FName& Key, co
 		return;
 	}
 
+	if (GetStringMetadata(Key, TEXT("")) == Value)
+	{
+		return;
+	}
+
+	const FScopedTransaction Transaction(LOCTEXT("SetReplicVariableStringMetadata", "Change Replic Variable Setting"));
+	Blueprint->Modify();
 	FBlueprintEditorUtils::SetBlueprintVariableMetaData(Blueprint.Get(), VariableName, nullptr, Key, Value);
 	RefreshBlueprint();
 }

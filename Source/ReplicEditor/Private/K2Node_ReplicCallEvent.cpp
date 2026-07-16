@@ -1,4 +1,4 @@
-#include "K2Node_ReplicCallEvent.h"
+﻿#include "K2Node_ReplicCallEvent.h"
 
 #include "BlueprintActionDatabaseRegistrar.h"
 #include "BlueprintNodeSpawner.h"
@@ -26,13 +26,7 @@ namespace
 	const FName TargetObjectPinName(TEXT("TargetObject"));
 	const FName EventNamePinName(TEXT("EventName"));
 	const FName SuccessPinName(TEXT("Success"));
-
-	bool UsesSelfAsContext(const UEdGraphPin* ContextPin)
-	{
-		return ContextPin && ContextPin->LinkedTo.Num() == 0 && ContextPin->DefaultObject == nullptr && ContextPin->DefaultValue.IsEmpty();
-	}
-
-	bool UsesSelfAsTarget(const UEdGraphPin* TargetPin)
+bool UsesSelfAsTarget(const UEdGraphPin* TargetPin)
 	{
 		return TargetPin && TargetPin->LinkedTo.Num() == 0 && TargetPin->DefaultObject == nullptr && TargetPin->DefaultValue.IsEmpty();
 	}
@@ -125,8 +119,29 @@ namespace
 			return false;
 		}
 
+		// The editor-side node is authoritative for events declared on the Blueprint currently being compiled. Generated
+		// classes can still expose the old UFunction for one compile after a rename, which must not validate a stale call.
+		if (FindMarkedEventNodeOnCurrentBlueprint(CallEventNode, SelectedEventName, OutEventNode))
+		{
+			return true;
+		}
+
 		if (ReplicPinOptionResolver::ResolveMarkedEvent(EventPin, SelectedEventName, OutFunction))
 		{
+			if (TargetsCurrentBlueprint(CallEventNode))
+			{
+				const UBlueprint* Blueprint = CallEventNode->GetBlueprint();
+				const UClass* FunctionOwner = OutFunction ? OutFunction->GetOwnerClass() : nullptr;
+				if (Blueprint && FunctionOwner
+					&& (FunctionOwner == Blueprint->SkeletonGeneratedClass.Get()
+						|| FunctionOwner == Blueprint->GeneratedClass.Get()
+						|| FunctionOwner->ClassGeneratedBy == Blueprint))
+				{
+					OutFunction = nullptr;
+					return false;
+				}
+			}
+
 			ReplicPinOptionResolver::ResolveMarkedEventNode(EventPin, SelectedEventName, OutEventNode);
 			if (OutEventNode && !IsReplicEnabledCustomEventNode(OutEventNode))
 			{
@@ -141,7 +156,7 @@ namespace
 			return true;
 		}
 
-		return FindMarkedEventNodeOnCurrentBlueprint(CallEventNode, SelectedEventName, OutEventNode);
+		return false;
 	}
 
 	void GatherExpectedEventPins(const UFunction* SelectedEvent, const UK2Node_CustomEvent* SelectedEventNode, TArray<FUserPinInfo>& OutPins)
@@ -669,7 +684,7 @@ void UK2Node_ReplicCallEvent::EarlyValidation(FCompilerResultsLog& MessageLog) c
 	const FName SelectedEventName(*EventPin->GetDefaultAsString());
 	if (SelectedEventName.IsNone())
 	{
-		MessageLog.Error(TEXT("Replic: No event is selected for @@"), this);
+		MessageLog.Error(TEXT("Replic: No Replic event is selected for @@. Choose a Replic-enabled custom event in the EventName dropdown."), this);
 		return;
 	}
 
@@ -680,7 +695,7 @@ void UK2Node_ReplicCallEvent::EarlyValidation(FCompilerResultsLog& MessageLog) c
 		UClass* TargetClass = nullptr;
 		if (!ReplicPinOptionResolver::ResolveTargetClass(EventPin, TargetClass))
 		{
-			MessageLog.Warning(TEXT("Replic: TargetObject could not be resolved to a concrete class for @@"), this);
+			MessageLog.Warning(TEXT("Replic: TargetObject could not be resolved to a concrete Blueprint class for @@. Connect a concrete actor/component reference or compile after the TargetObject type is known."), this);
 			return;
 		}
 
@@ -718,9 +733,10 @@ void UK2Node_ReplicCallEvent::EarlyValidation(FCompilerResultsLog& MessageLog) c
 
 	if (const UBlueprint* Blueprint = GetBlueprint())
 	{
-		if (UsesSelfAsContext(GetContextObjectPin()) && !ReplicK2NodeUtils::HasReplicTransportComponent(Blueprint))
+		FString ContextWarning;
+		if (ReplicK2NodeUtils::BuildContextObjectWarning(Blueprint, GetContextObjectPin(), ContextWarning))
 		{
-			MessageLog.Warning(TEXT("Replic: This Blueprint does not currently contain a ReplicTransportComponent. Client-side requests from Self may fail for @@"), this);
+			MessageLog.Warning(*FString::Printf(TEXT("Replic: %s for @@"), *ContextWarning), this);
 		}
 	}
 }

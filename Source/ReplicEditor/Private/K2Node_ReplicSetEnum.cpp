@@ -1,4 +1,4 @@
-#include "K2Node_ReplicSetEnum.h"
+﻿#include "K2Node_ReplicSetEnum.h"
 
 #include "BlueprintActionDatabaseRegistrar.h"
 #include "BlueprintNodeSpawner.h"
@@ -134,13 +134,7 @@ namespace
 
 		return NAME_None;
 	}
-
-	bool UsesSelfAsContext(const UEdGraphPin* ContextPin)
-	{
-		return ContextPin && ContextPin->LinkedTo.Num() == 0 && ContextPin->DefaultObject == nullptr && ContextPin->DefaultValue.IsEmpty();
-	}
-
-	void MovePinLinksOrCopyDefaults(FKismetCompilerContext& CompilerContext, UEdGraphPin* SourcePin, UEdGraphPin* TargetPin, bool bPreserveTargetDefaultsWhenSourceUnset = false)
+void MovePinLinksOrCopyDefaults(FKismetCompilerContext& CompilerContext, UEdGraphPin* SourcePin, UEdGraphPin* TargetPin, bool bPreserveTargetDefaultsWhenSourceUnset = false)
 	{
 		if (!SourcePin || !TargetPin)
 		{
@@ -328,7 +322,7 @@ void UK2Node_ReplicSetEnum::EarlyValidation(FCompilerResultsLog& MessageLog) con
 	const FName SelectedPropertyName(*PropertyPin->GetDefaultAsString());
 	if (SelectedPropertyName.IsNone())
 	{
-		MessageLog.Error(TEXT("Replic: No enum property is selected for @@"), this);
+		MessageLog.Error(TEXT("Replic: No Replic enum property is selected for @@. Choose a marked enum in the PropertyName dropdown."), this);
 		return;
 	}
 
@@ -338,7 +332,7 @@ void UK2Node_ReplicSetEnum::EarlyValidation(FCompilerResultsLog& MessageLog) con
 		UClass* TargetClass = nullptr;
 		if (!ReplicPinOptionResolver::ResolveTargetClass(PropertyPin, TargetClass))
 		{
-			MessageLog.Warning(TEXT("Replic: TargetObject could not be resolved to a concrete class for @@"), this);
+			MessageLog.Warning(TEXT("Replic: TargetObject could not be resolved to a concrete Blueprint class for @@. Connect a concrete actor/component reference or compile after the TargetObject type is known."), this);
 			return;
 		}
 
@@ -350,14 +344,15 @@ void UK2Node_ReplicSetEnum::EarlyValidation(FCompilerResultsLog& MessageLog) con
 
 	if (!ReplicK2NodeUtils::ArePinAndPropertyCompatible(GetValuePin(), SelectedProperty))
 	{
-		MessageLog.Error(TEXT("Replic: Value pin does not match the selected enum property for @@"), this);
+		MessageLog.Error(TEXT("Replic: Value pin type does not match the selected enum property for @@. Re-select the property or reconnect the Value pin so the enum type is rebuilt."), this);
 	}
 
 	if (const UBlueprint* Blueprint = GetBlueprint())
 	{
-		if (UsesSelfAsContext(GetContextObjectPin()) && !ReplicK2NodeUtils::HasReplicTransportComponent(Blueprint))
+		FString ContextWarning;
+		if (ReplicK2NodeUtils::BuildContextObjectWarning(Blueprint, GetContextObjectPin(), ContextWarning))
 		{
-			MessageLog.Warning(TEXT("Replic: This Blueprint does not currently contain a ReplicTransportComponent. Client-side requests from Self may fail for @@"), this);
+			MessageLog.Warning(*FString::Printf(TEXT("Replic: %s for @@"), *ContextWarning), this);
 		}
 	}
 }

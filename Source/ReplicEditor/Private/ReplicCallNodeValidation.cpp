@@ -1,4 +1,4 @@
-#include "ReplicCallNodeValidation.h"
+﻿#include "ReplicCallNodeValidation.h"
 
 #include "EdGraph/EdGraphPin.h"
 #include "K2Node_CallFunction.h"
@@ -196,6 +196,18 @@ bool ReplicCallNodeValidation::ValidateReplicCallNode(const UK2Node_CallFunction
 	}
 
 	const UFunction* TargetFunction = CallNode->GetTargetFunction();
+
+	if (UEdGraphPin* ContextPin = CallNode->FindPin(TEXT("ContextObject")))
+	{
+		FString ContextWarning;
+		const UBlueprint* Blueprint = CallNode->GetBlueprint();
+		if (ReplicK2NodeUtils::BuildContextObjectWarning(Blueprint, ContextPin, ContextWarning))
+		{
+			OutSeverity = EMessageSeverity::Warning;
+			OutMessage = ContextWarning;
+			return true;
+		}
+	}
 	const bool bIsReferenceSetter = !bIsEventCall && IsReferenceSetterFunction(TargetFunction);
 	if (bIsReferenceSetter)
 	{
@@ -234,7 +246,7 @@ bool ReplicCallNodeValidation::ValidateReplicCallNode(const UK2Node_CallFunction
 	if (!ReplicPinOptionResolver::ResolveTargetClass(NamePin, TargetClass))
 	{
 		OutSeverity = EMessageSeverity::Warning;
-		OutMessage = TEXT("TargetObject could not be resolved to a concrete class in the editor. Replic cannot validate this selection yet.");
+		OutMessage = TEXT("TargetObject could not be resolved to a concrete Blueprint class in the editor. Connect a concrete actor/component reference, or compile again after the TargetObject type is known. Replic cannot validate this selection yet.");
 		return true;
 	}
 

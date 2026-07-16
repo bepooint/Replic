@@ -6,3 +6,9 @@ void UReplicAutomationTestObject::MarkedEvent(int32 Count, FName Item, TArray<in
 	LastEventItem = Item;
 	LastEventValues = MoveTemp(Values);
 }
+
+void UReplicAutomationTestObject::MarkedReferenceEvent(UObject* ObjectValue, TSubclassOf<AActor> ClassValue)
+{
+	LastEventObject = ObjectValue;
+	LastEventClass = ClassValue;
+}

@@ -86,8 +86,10 @@ namespace
 	void EmitReplicDebugMessage(EReplicDebugChannel Channel, ELogVerbosity::Type Verbosity, const FString& Message, const FColor& ScreenColor = FColor::White, const FString& ScreenMessage = FString())
 	{
 		const UReplicSettings* Settings = GetReplicSettings();
-		const bool bLogToOutput = ShouldLogReplicRuntime(Channel);
-		const bool bLogToScreen = ShouldShowReplicScreenMessages(Channel);
+		const bool bRoutineMessage = Verbosity != ELogVerbosity::Warning && Verbosity != ELogVerbosity::Error && Verbosity != ELogVerbosity::Fatal;
+		const bool bRoutineMessageEnabled = !bRoutineMessage || (Settings && Settings->bEnableVerboseRuntimeLogs);
+		const bool bLogToOutput = bRoutineMessageEnabled && ShouldLogReplicRuntime(Channel);
+		const bool bLogToScreen = bRoutineMessageEnabled && ShouldShowReplicScreenMessages(Channel);
 		if (!bLogToOutput && !bLogToScreen)
 		{
 			return;
@@ -95,18 +97,46 @@ namespace
 
 		if (bLogToOutput)
 		{
-			switch (Verbosity)
+#define REPLIC_LOG_TO_CATEGORY(CategoryName) \
+			do \
+			{ \
+				if (Verbosity == ELogVerbosity::Error || Verbosity == ELogVerbosity::Fatal) \
+				{ \
+					UE_LOG(CategoryName, Error, TEXT("%s"), *Message); \
+				} \
+				else if (Verbosity == ELogVerbosity::Warning) \
+				{ \
+					UE_LOG(CategoryName, Warning, TEXT("%s"), *Message); \
+				} \
+				else \
+				{ \
+					UE_LOG(CategoryName, Log, TEXT("%s"), *Message); \
+				} \
+			} while (false)
+
+			switch (Channel)
 			{
-			case ELogVerbosity::Warning:
-				UE_LOG(LogReplic, Warning, TEXT("%s"), *Message);
+			case EReplicDebugChannel::Writes:
+				REPLIC_LOG_TO_CATEGORY(LogReplicWrites);
 				break;
-			case ELogVerbosity::Error:
-				UE_LOG(LogReplic, Error, TEXT("%s"), *Message);
+			case EReplicDebugChannel::Events:
+				REPLIC_LOG_TO_CATEGORY(LogReplicEvents);
+				break;
+			case EReplicDebugChannel::State:
+				REPLIC_LOG_TO_CATEGORY(LogReplicState);
+				break;
+			case EReplicDebugChannel::Observers:
+				REPLIC_LOG_TO_CATEGORY(LogReplicObservers);
+				break;
+			case EReplicDebugChannel::Permissions:
+				REPLIC_LOG_TO_CATEGORY(LogReplicPermissions);
 				break;
 			default:
-				UE_LOG(LogReplic, Log, TEXT("%s"), *Message);
+				REPLIC_LOG_TO_CATEGORY(LogReplic);
 				break;
 			}
+
+#undef REPLIC_LOG_TO_CATEGORY
 		}
 
 		if (bLogToScreen && GEngine && Settings)
@@ -129,6 +159,48 @@ namespace
 				Reason),
 			FColor::Red,
 			FString::Printf(TEXT("Replic Denied: %s"), *SubjectName.ToString()));
+	}
+
+	const TCHAR* GetPermissionModeLabel(const EReplicPermissionMode PermissionMode)
+	{
+		switch (PermissionMode)
+		{
+		case EReplicPermissionMode::None:
+			return TEXT("None");
+		case EReplicPermissionMode::OwnerOnly:
+			return TEXT("OwnerOnly");
+		case EReplicPermissionMode::ServerOnly:
+			return TEXT("ServerOnly");
+		case EReplicPermissionMode::Custom:
+			return TEXT("Custom");
+		default:
+			return TEXT("Unknown");
+		}
+	}
+
+	void LogPermissionDecision(
+		const TCHAR* SubjectKind,
+		FName SubjectName,
+		const UObject* TargetObject,
+		const AActor* RequestHostActor,
+		const EReplicPermissionMode PermissionMode,
+		const TCHAR* ValidationStage,
+		const FString& Reason)
+	{
+		EmitReplicDebugMessage(
+			EReplicDebugChannel::Permissions,
+			ELogVerbosity::Warning,
+			FString::Printf(
+				TEXT("Replic permission denied: Mode=%s Stage=%s Subject=%s Name='%s' Target='%s' Requester='%s' Reason=%s"),
+				GetPermissionModeLabel(PermissionMode),
+				ValidationStage,
+				SubjectKind,
+				*SubjectName.ToString(),
+				*GetPathNameSafe(TargetObject),
+				*GetPathNameSafe(RequestHostActor),
+				*Reason),
+			FColor::Red,
+			FString::Printf(TEXT("Replic Denied [%s]: %s"), GetPermissionModeLabel(PermissionMode), *SubjectName.ToString()));
 	}
 
 	void AddPermissionIdentityActor(const AActor* CandidateActor, TArray<const AActor*>& OutActors)
@@ -199,17 +271,31 @@ namespace
 		return false;
 	}
 
-	bool TryInvokeCustomValidation(UObject* TargetObject, FName ValidationFunctionName, AActor* RequestHostActor, bool& bOutAllowed)
+	bool TryInvokeCustomValidation(
+		UObject* TargetObject,
+		FName ValidationFunctionName,
+		AActor* RequestHostActor,
+		bool& bOutAllowed,
+		FString& OutFailureReason)
 	{
 		bOutAllowed = false;
-		if (!TargetObject || ValidationFunctionName.IsNone())
+		OutFailureReason.Reset();
+		if (!TargetObject)
 		{
+			OutFailureReason = TEXT("target object is invalid");
+			return false;
+		}
+
+		if (ValidationFunctionName.IsNone())
+		{
+			OutFailureReason = TEXT("validation function name is empty");
 			return false;
 		}
 
 		UFunction* ValidationFunction = TargetObject->FindFunction(ValidationFunctionName);
 		if (!ValidationFunction)
 		{
+			OutFailureReason = FString::Printf(TEXT("validation function '%s' was not found"), *ValidationFunctionName.ToString());
 			return false;
 		}
 
@@ -223,11 +309,17 @@ namespace
 			if (FunctionProperty->HasAnyPropertyFlags(CPF_ReturnParm))
 			{
 				ReturnProperty = CastField<FBoolProperty>(FunctionProperty);
+				if (!ReturnProperty)
+				{
+					OutFailureReason = FString::Printf(TEXT("validation function '%s' must return Boolean"), *ValidationFunctionName.ToString());
+					return false;
+				}
 				continue;
 			}
 
 			if (FunctionProperty->HasAnyPropertyFlags(CPF_OutParm))
 			{
+				OutFailureReason = FString::Printf(TEXT("validation function '%s' cannot use output parameters"), *ValidationFunctionName.ToString());
 				return false;
 			}
 
@@ -235,12 +327,20 @@ namespace
 			InputObjectProperty = CastField<FObjectPropertyBase>(FunctionProperty);
 			if (!InputObjectProperty)
 			{
+				OutFailureReason = FString::Printf(TEXT("validation function '%s' may only take one Actor-compatible input"), *ValidationFunctionName.ToString());
 				return false;
 			}
 		}
 
-		if (!ReturnProperty || InputParamCount > 1)
+		if (!ReturnProperty)
 		{
+			OutFailureReason = FString::Printf(TEXT("validation function '%s' has no Boolean return value"), *ValidationFunctionName.ToString());
+			return false;
+		}
+
+		if (InputParamCount > 1)
+		{
+			OutFailureReason = FString::Printf(TEXT("validation function '%s' has more than one input parameter"), *ValidationFunctionName.ToString());
 			return false;
 		}
 
@@ -256,8 +356,17 @@ namespace
 		bool bCanInvoke = true;
 		if (InputObjectProperty)
 		{
-			if (!RequestHostActor || !RequestHostActor->IsA(InputObjectProperty->PropertyClass))
+			if (!InputObjectProperty->PropertyClass->IsChildOf(AActor::StaticClass()))
 			{
+				OutFailureReason = FString::Printf(TEXT("validation function '%s' input must accept an Actor type"), *ValidationFunctionName.ToString());
+				bCanInvoke = false;
+			}
+			else if (!RequestHostActor || !RequestHostActor->IsA(InputObjectProperty->PropertyClass))
+			{
+				OutFailureReason = FString::Printf(
+					TEXT("requester '%s' is not compatible with validation input '%s'"),
+					*GetPathNameSafe(RequestHostActor),
+					*GetNameSafe(InputObjectProperty->PropertyClass));
 				bCanInvoke = false;
 			}
 			else
@@ -281,22 +390,24 @@ namespace
 		return bCanInvoke;
 	}
 
-	bool EvaluateCustomPropertyPermission(UObject* TargetObject, FName PropertyName, AActor* RequestHostActor, bool& bOutAllowed)
+	bool EvaluateCustomPropertyPermission(UObject* TargetObject, FName PropertyName, AActor* RequestHostActor, bool& bOutAllowed, FString& OutFailureReason)
 	{
 		return TryInvokeCustomValidation(
 			TargetObject,
 			FName(*FString::Printf(TEXT("CanReplicWrite_%s"), *PropertyName.ToString())),
 			RequestHostActor,
-			bOutAllowed);
+			bOutAllowed,
+			OutFailureReason);
 	}
 
-	bool EvaluateCustomEventPermission(UObject* TargetObject, FName EventName, AActor* RequestHostActor, bool& bOutAllowed)
+	bool EvaluateCustomEventPermission(UObject* TargetObject, FName EventName, AActor* RequestHostActor, bool& bOutAllowed, FString& OutFailureReason)
 	{
 		return TryInvokeCustomValidation(
 			TargetObject,
 			FName(*FString::Printf(TEXT("CanReplicCall_%s"), *EventName.ToString())),
 			RequestHostActor,
-			bOutAllowed);
+			bOutAllowed,
+			OutFailureReason);
 	}
 
 	const TCHAR* GetContainerDeltaOperationLabel(EReplicContainerDeltaOperation Operation)
@@ -367,12 +478,12 @@ namespace
 			case EReplicPermissionMode::OwnerOnly:
 				if (!IsOwnedByRequester(RequestHostActor, TargetHostActor))
 				{
-					LogPermissionDecision(TEXT("property write"), PropertyName, MetadataSourceObject, RequestHostActor, TEXT("OwnerOnly check failed"));
+					LogPermissionDecision(TEXT("property write"), PropertyName, MetadataSourceObject, RequestHostActor, Settings.PermissionMode, TEXT("ServerAuthority"), TEXT("requester does not own the target"));
 					return false;
 				}
 				break;
 			case EReplicPermissionMode::ServerOnly:
-				LogPermissionDecision(TEXT("property write"), PropertyName, MetadataSourceObject, RequestHostActor, TEXT("ServerOnly check failed"));
+				LogPermissionDecision(TEXT("property write"), PropertyName, MetadataSourceObject, RequestHostActor, Settings.PermissionMode, TEXT("ServerAuthority"), TEXT("request originated from a client"));
 				return false;
 			case EReplicPermissionMode::Custom:
 				break;
@@ -384,15 +495,16 @@ namespace
 		if (Settings.PermissionMode == EReplicPermissionMode::Custom)
 		{
 			bool bAllowed = false;
-			if (!EvaluateCustomPropertyPermission(const_cast<UObject*>(MetadataSourceObject), PropertyName, RequestHostActor, bAllowed))
+			FString ValidationFailureReason;
+			if (!EvaluateCustomPropertyPermission(const_cast<UObject*>(MetadataSourceObject), PropertyName, RequestHostActor, bAllowed, ValidationFailureReason))
 			{
-				LogPermissionDecision(TEXT("property write"), PropertyName, MetadataSourceObject, RequestHostActor, TEXT("custom validation function missing or unsupported"));
+				LogPermissionDecision(TEXT("property write"), PropertyName, MetadataSourceObject, RequestHostActor, Settings.PermissionMode, TEXT("ServerAuthority"), ValidationFailureReason);
 				return false;
 			}
 
 			if (!bAllowed)
 			{
-				LogPermissionDecision(TEXT("property write"), PropertyName, MetadataSourceObject, RequestHostActor, TEXT("custom validation rejected the request"));
+				LogPermissionDecision(TEXT("property write"), PropertyName, MetadataSourceObject, RequestHostActor, Settings.PermissionMode, TEXT("ServerAuthority"), TEXT("custom validation returned false"));
 				return false;
 			}
 		}
@@ -642,6 +754,19 @@ bool UReplicTransportComponent::FindVariableDefinition(const FReplicTargetDescri
 	}
 
 	return false;
+}
+
+bool UReplicTransportComponent::TryGetPersistentStateDebugValue(const FReplicTargetDescriptor& TargetDescriptor, FName PropertyName, FString& OutSerializedValue) const
+{
+	OutSerializedValue.Reset();
+	const int32 EntryIndex = FindStateEntryIndex(TargetDescriptor, PropertyName);
+	if (!ReplicatedStates.Items.IsValidIndex(EntryIndex))
+	{
+		return false;
+	}
+
+	OutSerializedValue = ReplicatedStates.Items[EntryIndex].SerializedValue;
+	return true;
 }
 
 bool UReplicTransportComponent::FindEventDefinition(const FReplicTargetDescriptor& TargetDescriptor, FName EventName, FReplicEventSettings& OutSettings) const
@@ -944,25 +1069,18 @@ bool UReplicTransportComponent::RequestMarkedPropertyWrite(UObject* ContextObjec
 
 	if (Settings.PermissionMode == EReplicPermissionMode::OwnerOnly && !IsOwnedByRequester(RequestTarget.HostActor, TargetTarget.HostActor))
 	{
-		LogPermissionDecision(TEXT("property write"), PropertyName, MetadataSourceObject, RequestTarget.HostActor, TEXT("OwnerOnly preflight check failed"));
+		LogPermissionDecision(TEXT("property write"), PropertyName, MetadataSourceObject, RequestTarget.HostActor, Settings.PermissionMode, TEXT("ClientPreflight"), TEXT("requester does not own the target"));
 		return false;
 	}
 
 	if (Settings.PermissionMode == EReplicPermissionMode::ServerOnly)
 	{
-		LogPermissionDecision(TEXT("property write"), PropertyName, MetadataSourceObject, RequestTarget.HostActor, TEXT("ServerOnly preflight check failed"));
+		LogPermissionDecision(TEXT("property write"), PropertyName, MetadataSourceObject, RequestTarget.HostActor, Settings.PermissionMode, TEXT("ClientPreflight"), TEXT("client requests are not allowed"));
 		return false;
 	}
 
-	if (Settings.PermissionMode == EReplicPermissionMode::Custom)
-	{
-		bool bAllowed = false;
-		if (!EvaluateCustomPropertyPermission(const_cast<UObject*>(MetadataSourceObject), PropertyName, RequestTarget.HostActor, bAllowed) || !bAllowed)
-		{
-			LogPermissionDecision(TEXT("property write"), PropertyName, MetadataSourceObject, RequestTarget.HostActor, TEXT("Custom preflight check failed"));
-			return false;
-		}
-	}
+	// Custom rules are authoritative server logic. Client state may be stale or intentionally incomplete,
+	// so the request is sent and the matching validation function is evaluated only on the server.
 
 	ServerRequestPropertyWrite(TargetTarget.HostActor, TargetTarget.Descriptor, PropertyName, SerializedValue);
 	EmitReplicDebugMessage(
@@ -1049,25 +1167,17 @@ bool UReplicTransportComponent::RequestMarkedContainerDelta(
 
 	if (Settings.PermissionMode == EReplicPermissionMode::OwnerOnly && !IsOwnedByRequester(RequestTarget.HostActor, TargetTarget.HostActor))
 	{
-		LogPermissionDecision(TEXT("property write"), PropertyName, MetadataSourceObject, RequestTarget.HostActor, TEXT("OwnerOnly preflight check failed"));
+		LogPermissionDecision(TEXT("property write"), PropertyName, MetadataSourceObject, RequestTarget.HostActor, Settings.PermissionMode, TEXT("ClientPreflight"), TEXT("requester does not own the target"));
 		return false;
 	}
 
 	if (Settings.PermissionMode == EReplicPermissionMode::ServerOnly)
 	{
-		LogPermissionDecision(TEXT("property write"), PropertyName, MetadataSourceObject, RequestTarget.HostActor, TEXT("ServerOnly preflight check failed"));
+		LogPermissionDecision(TEXT("property write"), PropertyName, MetadataSourceObject, RequestTarget.HostActor, Settings.PermissionMode, TEXT("ClientPreflight"), TEXT("client requests are not allowed"));
 		return false;
 	}
 
-	if (Settings.PermissionMode == EReplicPermissionMode::Custom)
-	{
-		bool bAllowed = false;
-		if (!EvaluateCustomPropertyPermission(const_cast<UObject*>(MetadataSourceObject), PropertyName, RequestTarget.HostActor, bAllowed) || !bAllowed)
-		{
-			LogPermissionDecision(TEXT("property write"), PropertyName, MetadataSourceObject, RequestTarget.HostActor, TEXT("Custom preflight check failed"));
-			return false;
-		}
-	}
+	// Custom container permissions are evaluated against the authoritative target state on the server.
 
 	ServerRequestContainerDelta(
 		TargetTarget.HostActor,
@@ -1147,25 +1257,17 @@ bool UReplicTransportComponent::RequestMarkedEvent(UObject* ContextObject, UObje
 
 	if (Settings.PermissionMode == EReplicPermissionMode::OwnerOnly && !IsOwnedByRequester(RequestTarget.HostActor, TargetTarget.HostActor))
 	{
-		LogPermissionDecision(TEXT("event"), EventName, MetadataSourceObject, RequestTarget.HostActor, TEXT("OwnerOnly preflight check failed"));
+		LogPermissionDecision(TEXT("event"), EventName, MetadataSourceObject, RequestTarget.HostActor, Settings.PermissionMode, TEXT("ClientPreflight"), TEXT("requester does not own the target"));
 		return false;
 	}
 
 	if (Settings.PermissionMode == EReplicPermissionMode::ServerOnly)
 	{
-		LogPermissionDecision(TEXT("event"), EventName, MetadataSourceObject, RequestTarget.HostActor, TEXT("ServerOnly preflight check failed"));
+		LogPermissionDecision(TEXT("event"), EventName, MetadataSourceObject, RequestTarget.HostActor, Settings.PermissionMode, TEXT("ClientPreflight"), TEXT("client requests are not allowed"));
 		return false;
 	}
 
-	if (Settings.PermissionMode == EReplicPermissionMode::Custom)
-	{
-		bool bAllowed = false;
-		if (!EvaluateCustomEventPermission(const_cast<UObject*>(MetadataSourceObject), EventName, RequestTarget.HostActor, bAllowed) || !bAllowed)
-		{
-			LogPermissionDecision(TEXT("event"), EventName, MetadataSourceObject, RequestTarget.HostActor, TEXT("Custom preflight check failed"));
-			return false;
-		}
-	}
+	// Custom event permissions are evaluated only by the server.
 
 	ServerRequestEvent(TargetTarget.HostActor, TargetTarget.Descriptor, EventName, Arguments);
 	EmitReplicDebugMessage(
@@ -1621,12 +1723,12 @@ bool UReplicTransportComponent::ApplyAuthoritativeEvent(
 		case EReplicPermissionMode::OwnerOnly:
 			if (!IsOwnedByRequester(RequestHostActor, TargetHostActor))
 			{
-				LogPermissionDecision(TEXT("event"), EventName, MetadataSourceObject, RequestHostActor, TEXT("OwnerOnly check failed"));
+				LogPermissionDecision(TEXT("event"), EventName, MetadataSourceObject, RequestHostActor, Settings.PermissionMode, TEXT("ServerAuthority"), TEXT("requester does not own the target"));
 				return false;
 			}
 			break;
 		case EReplicPermissionMode::ServerOnly:
-			LogPermissionDecision(TEXT("event"), EventName, MetadataSourceObject, RequestHostActor, TEXT("ServerOnly check failed"));
+			LogPermissionDecision(TEXT("event"), EventName, MetadataSourceObject, RequestHostActor, Settings.PermissionMode, TEXT("ServerAuthority"), TEXT("request originated from a client"));
 			return false;
 		case EReplicPermissionMode::Custom:
 			break;
@@ -1638,15 +1740,16 @@ bool UReplicTransportComponent::ApplyAuthoritativeEvent(
 	if (Settings.PermissionMode == EReplicPermissionMode::Custom)
 	{
 		bool bAllowed = false;
-		if (!EvaluateCustomEventPermission(const_cast<UObject*>(MetadataSourceObject), EventName, RequestHostActor, bAllowed))
+		FString ValidationFailureReason;
+		if (!EvaluateCustomEventPermission(const_cast<UObject*>(MetadataSourceObject), EventName, RequestHostActor, bAllowed, ValidationFailureReason))
 		{
-			LogPermissionDecision(TEXT("event"), EventName, MetadataSourceObject, RequestHostActor, TEXT("custom validation function missing or unsupported"));
+			LogPermissionDecision(TEXT("event"), EventName, MetadataSourceObject, RequestHostActor, Settings.PermissionMode, TEXT("ServerAuthority"), ValidationFailureReason);
 			return false;
 		}
 
 		if (!bAllowed)
 		{
-			LogPermissionDecision(TEXT("event"), EventName, MetadataSourceObject, RequestHostActor, TEXT("custom validation rejected the request"));
+			LogPermissionDecision(TEXT("event"), EventName, MetadataSourceObject, RequestHostActor, Settings.PermissionMode, TEXT("ServerAuthority"), TEXT("custom validation returned false"));
 			return false;
 		}
 	}

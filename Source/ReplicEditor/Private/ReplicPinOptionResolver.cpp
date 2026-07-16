@@ -9,6 +9,7 @@
 #include "K2Node_CallFunction.h"
 #include "K2Node_CustomEvent.h"
 #include "ReplicLibrary.h"
+#include "ReplicMetadata.h"
 #include "ReplicRuntimeUtils.h"
 #include "K2Node_ReplicCallEvent.h"
 #include "K2Node_ReplicGetArray.h"
@@ -660,6 +661,50 @@ namespace
 		}
 	}
 
+	void CollectMarkedEventNodesFromBlueprintHierarchy(UClass* TargetClass, TArray<FReplicCollectedOption>& OutOptions)
+	{
+		TSet<const UBlueprint*> VisitedBlueprints;
+		for (UClass* CurrentClass = TargetClass; CurrentClass; CurrentClass = CurrentClass->GetSuperClass())
+		{
+			UBlueprint* Blueprint = Cast<UBlueprint>(CurrentClass->ClassGeneratedBy);
+			if (!Blueprint || VisitedBlueprints.Contains(Blueprint))
+			{
+				continue;
+			}
+
+			VisitedBlueprints.Add(Blueprint);
+			TArray<UK2Node_CustomEvent*> CustomEventNodes;
+			FBlueprintEditorUtils::GetAllNodesOfClass(Blueprint, CustomEventNodes);
+			for (UK2Node_CustomEvent* EventNode : CustomEventNodes)
+			{
+				if (!EventNode)
+				{
+					continue;
+				}
+
+				const auto& Metadata = EventNode->GetUserDefinedMetaData();
+				if (!Metadata.HasMetaData(ReplicMetadata::EventEnabled)
+					|| !Metadata.GetMetaData(ReplicMetadata::EventEnabled).ToBool())
+				{
+					continue;
+				}
+
+				const FName EventName = EventNode->CustomFunctionName.IsNone()
+					? EventNode->GetFunctionName()
+					: EventNode->CustomFunctionName;
+				if (EventName.IsNone())
+				{
+					continue;
+				}
+
+				FReplicCollectedOption& NewOption = OutOptions.AddDefaulted_GetRef();
+				NewOption.Value = EventName;
+				NewOption.OriginName = Blueprint->GetName();
+				NewOption.OriginPath = Blueprint->GetPathName();
+			}
+		}
+	}
+
 	void CollectGlobalMarkedProperties(EReplicPinOptionKind Kind, TArray<FReplicCollectedOption>& OutOptions)
 	{
 		for (TObjectIterator<UClass> ClassIt; ClassIt; ++ClassIt)
@@ -1148,6 +1193,7 @@ void ReplicPinOptionResolver::BuildOptions(const UEdGraphPin* Pin, TArray<TShare
 		if (Kind == EReplicPinOptionKind::Event)
 		{
 			CollectMarkedEventsFromClass(TargetClass, RawOptions);
+			CollectMarkedEventNodesFromBlueprintHierarchy(TargetClass, RawOptions);
 		}
 		else
 		{

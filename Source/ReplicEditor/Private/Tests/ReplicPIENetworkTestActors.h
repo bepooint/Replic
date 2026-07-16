@@ -4,10 +4,10 @@
 #include "GameFramework/GameModeBase.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/DefaultPawn.h"
+#include "ReplicTransportComponent.h"
 
 #include "ReplicPIENetworkTestActors.generated.h"
 
-class UReplicTransportComponent;
 class USceneComponent;
 class UReplicPropertyObserver;
 
@@ -39,6 +39,22 @@ public:
 };
 
 UCLASS()
+class REPLICEDITOR_API UReplicPIETestTransportComponent : public UReplicTransportComponent
+{
+	GENERATED_BODY()
+
+public:
+	void SendUncheckedPropertyRequest(AActor* TargetHostActor, FName PropertyName, const FString& SerializedValue);
+	void SendUncheckedContainerRequest(
+		AActor* TargetHostActor,
+		FName PropertyName,
+		EReplicContainerDeltaOperation Operation,
+		const FString& SerializedPrimaryValue,
+		const FString& SerializedSecondaryValue = FString());
+	void SendUncheckedEventRequest(AActor* TargetHostActor, FName EventName, const TArray<FReplicNamedValue>& Arguments);
+};
+
+UCLASS()
 class REPLICEDITOR_API AReplicPIENetworkPlayerController : public APlayerController
 {
 	GENERATED_BODY()
@@ -47,7 +63,7 @@ public:
 	AReplicPIENetworkPlayerController();
 
 	UPROPERTY(VisibleAnywhere, Category = "Replic|Tests")
-	TObjectPtr<UReplicTransportComponent> ReplicTransportComponent = nullptr;
+	TObjectPtr<UReplicPIETestTransportComponent> ReplicTransportComponent = nullptr;
 };
 
 UCLASS()
@@ -95,6 +111,12 @@ public:
 	TObjectPtr<AReplicPIENetworkActor> LinkedActor = nullptr;
 
 	UPROPERTY()
+	TObjectPtr<AReplicPIENetworkActor> LastEventActor = nullptr;
+
+	UPROPERTY()
+	TSubclassOf<AActor> LastEventClass;
+
+	UPROPERTY()
 	bool bAllowCustomWrite = false;
 
 	UPROPERTY()
@@ -107,10 +129,34 @@ public:
 	void MarkedVectorPulse(FVector Delta);
 
 	UFUNCTION()
+	void MarkedReferencePulse(AReplicPIENetworkActor* ActorValue, TSubclassOf<AActor> ClassValue);
+
+	UFUNCTION()
 	bool CanReplicWrite_SharedValue(AActor* RequestingActor);
 
 	UFUNCTION()
+	bool CanReplicWrite_SharedArray(AActor* RequestingActor);
+
+	UFUNCTION()
 	bool CanReplicCall_MarkedPulse(AActor* RequestingActor);
+};
+
+UCLASS()
+class REPLICEDITOR_API AReplicPIEComponentLoadActor : public AActor
+{
+	GENERATED_BODY()
+
+public:
+	AReplicPIEComponentLoadActor();
+
+	UPROPERTY(VisibleAnywhere, Category = "Replic|Tests")
+	TObjectPtr<USceneComponent> RootSceneComponent = nullptr;
+
+	UPROPERTY(VisibleAnywhere, Category = "Replic|Tests")
+	TObjectPtr<UReplicTransportComponent> ReplicTransportComponent = nullptr;
+
+	UPROPERTY(VisibleAnywhere, Category = "Replic|Tests")
+	TArray<TObjectPtr<USceneComponent>> TrackedComponents;
 };
 
 UCLASS()
@@ -120,4 +166,5 @@ class REPLICEDITOR_API AReplicPIENetworkGameMode : public AGameModeBase
 
 public:
 	AReplicPIENetworkGameMode();
+	virtual void GetSeamlessTravelActorList(bool bToTransition, TArray<AActor*>& ActorList) override;
 };

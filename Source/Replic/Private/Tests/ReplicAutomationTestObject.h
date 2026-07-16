@@ -89,8 +89,17 @@ public:
 	UPROPERTY()
 	TArray<int32> LastEventValues;
 
+	UPROPERTY()
+	TObjectPtr<UObject> LastEventObject = nullptr;
+
+	UPROPERTY()
+	TSubclassOf<AActor> LastEventClass;
+
 	UFUNCTION()
 	void MarkedEvent(int32 Count, FName Item, TArray<int32> Values);
+
+	UFUNCTION()
+	void MarkedReferenceEvent(UObject* ObjectValue, TSubclassOf<AActor> ClassValue);
 };
 
 UCLASS()

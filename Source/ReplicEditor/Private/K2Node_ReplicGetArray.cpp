@@ -1,4 +1,4 @@
-#include "K2Node_ReplicGetArray.h"
+﻿#include "K2Node_ReplicGetArray.h"
 
 #include "BlueprintActionDatabaseRegistrar.h"
 #include "BlueprintNodeSpawner.h"
@@ -174,7 +174,7 @@ void UK2Node_ReplicGetArray::EarlyValidation(FCompilerResultsLog& MessageLog) co
 	const FName SelectedPropertyName(*PropertyPin->GetDefaultAsString());
 	if (SelectedPropertyName.IsNone())
 	{
-		MessageLog.Error(TEXT("Replic: No array property is selected for @@"), this);
+		MessageLog.Error(TEXT("Replic: No Replic array property is selected for @@. Choose a marked array in the PropertyName dropdown."), this);
 		return;
 	}
 
@@ -184,7 +184,7 @@ void UK2Node_ReplicGetArray::EarlyValidation(FCompilerResultsLog& MessageLog) co
 		UClass* TargetClass = nullptr;
 		if (!ReplicPinOptionResolver::ResolveTargetClass(PropertyPin, TargetClass))
 		{
-			MessageLog.Warning(TEXT("Replic: TargetObject could not be resolved to a concrete class for @@"), this);
+			MessageLog.Warning(TEXT("Replic: TargetObject could not be resolved to a concrete Blueprint class for @@. Connect a concrete actor/component reference or compile after the TargetObject type is known."), this);
 			return;
 		}
 

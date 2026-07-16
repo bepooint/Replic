@@ -3,20 +3,24 @@
 #include "Replic.h"
 #include "ReplicSettings.h"
 #include "ReplicTransportComponent.h"
+#include "GameFramework/Actor.h"
 
 namespace
 {
 	bool ShouldLogObserverDebug()
 	{
 		const UReplicSettings* Settings = GetDefault<UReplicSettings>();
-		return Settings && Settings->bEnableRuntimeDebugLogs && Settings->bEnableObserverDebugLogs;
+		return Settings
+			&& Settings->bEnableRuntimeDebugLogs
+			&& Settings->bEnableVerboseRuntimeLogs
+			&& Settings->bEnableObserverDebugLogs;
 	}
 
 	void LogObserverDebug(const FString& Message)
 	{
 		if (ShouldLogObserverDebug())
 		{
-			UE_LOG(LogReplic, Log, TEXT("%s"), *Message);
+			UE_LOG(LogReplicObservers, Log, TEXT("%s"), *Message);
 		}
 	}
 }
@@ -27,26 +31,42 @@ void UReplicPropertyObserver::Initialize(UReplicTransportComponent* InTransportC
 	TargetObject = InTargetObject;
 	PropertyName = InPropertyName;
 
-	if (TransportComponent)
+	if (TransportComponent.IsValid())
 	{
 		TransportComponent->OnMarkedPropertyChanged.AddDynamic(this, &UReplicPropertyObserver::HandleTransportPropertyChanged);
+		HostActor = TransportComponent->GetOwner();
+		if (HostActor.IsValid())
+		{
+			HostActor->OnDestroyed.AddUniqueDynamic(this, &UReplicPropertyObserver::HandleHostActorDestroyed);
+		}
 	}
 
-	LogObserverDebug(FString::Printf(TEXT("Replic observer bound to '%s' for property '%s'."), *GetPathNameSafe(TargetObject), *PropertyName.ToString()));
+	LogObserverDebug(FString::Printf(TEXT("Replic observer bound to '%s' for property '%s'."), *GetPathNameSafe(TargetObject.Get()), *PropertyName.ToString()));
 }
 
 void UReplicPropertyObserver::Unbind()
 {
-	if (TransportComponent)
+	if (TransportComponent.IsValid())
 	{
 		TransportComponent->OnMarkedPropertyChanged.RemoveDynamic(this, &UReplicPropertyObserver::HandleTransportPropertyChanged);
 	}
 
-	TransportComponent = nullptr;
-	TargetObject = nullptr;
+	if (HostActor.IsValid())
+	{
+		HostActor->OnDestroyed.RemoveDynamic(this, &UReplicPropertyObserver::HandleHostActorDestroyed);
+	}
+
+	TransportComponent.Reset();
+	TargetObject.Reset();
+	HostActor.Reset();
 	PropertyName = NAME_None;
 
 	LogObserverDebug(TEXT("Replic observer unbound."));
+}
+
+bool UReplicPropertyObserver::IsBound() const
+{
+	return TransportComponent.IsValid() && TargetObject.IsValid() && HostActor.IsValid();
 }
 
 void UReplicPropertyObserver::BeginDestroy()
@@ -59,7 +79,7 @@ void UReplicPropertyObserver::HandleTransportPropertyChanged(UObject* ChangedTar
 {
 	// A binding is always scoped to one local target object instance. PropertyName == None means "listen to any marked
 	// property on that object", which keeps the node useful for generic UI refresh logic.
-	if (!TargetObject || ChangedTargetObject != TargetObject)
+	if (!TargetObject.IsValid() || ChangedTargetObject != TargetObject.Get())
 	{
 		return;
 	}
@@ -71,4 +91,9 @@ void UReplicPropertyObserver::HandleTransportPropertyChanged(UObject* ChangedTar
 
 	LogObserverDebug(FString::Printf(TEXT("Replic observer received change '%s' on '%s'."), *ChangedPropertyName.ToString(), *GetPathNameSafe(ChangedTargetObject)));
 	OnChanged.Broadcast(ChangedTargetObject, ChangedPropertyName);
+}
+
+void UReplicPropertyObserver::HandleHostActorDestroyed(AActor* DestroyedActor)
+{
+	Unbind();
 }

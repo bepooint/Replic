@@ -35,6 +35,7 @@ public:
 	void RefreshComponentTransformTracking(bool bCommitPersistentInitialState = false, bool bForceSend = false);
 	bool FindVariableDefinition(const FReplicTargetDescriptor& TargetDescriptor, FName PropertyName, FReplicVariableSettings& OutSettings) const;
 	bool FindEventDefinition(const FReplicTargetDescriptor& TargetDescriptor, FName EventName, FReplicEventSettings& OutSettings) const;
+	bool TryGetPersistentStateDebugValue(const FReplicTargetDescriptor& TargetDescriptor, FName PropertyName, FString& OutSerializedValue) const;
 
 	void HandleReplicatedStateEntryChanged(const FReplicStateEntry& Entry);
 	void HandleReplicatedStateEntryRemoved(int32 RemovedIndex);

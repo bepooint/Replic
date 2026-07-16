@@ -1,4 +1,4 @@
-#include "ReplicEventDetailsCustomization.h"
+﻿#include "ReplicEventDetailsCustomization.h"
 
 #include "BlueprintEditor.h"
 #include "DetailCategoryBuilder.h"
@@ -14,6 +14,7 @@
 #include "EdGraphSchema_K2.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "ReplicMetadata.h"
+#include "ScopedTransaction.h"
 #include "SMyBlueprint.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
@@ -24,7 +25,7 @@
 
 namespace
 {
-	const FText ReplicateAllEventTooltip = LOCTEXT("ReplicateAllEventTooltip", "Enables Replic handling for this custom event.\n\nCalls made through Call Marked Event are sent to the server and then dispatched using the selected Replic mode.");
+	const FText EnableReplicEventTooltip = LOCTEXT("EnableReplicEventTooltip", "Enables Replic for this custom event.\n\nThis does not automatically run the event by itself. Calls made through Replic Call Event or Call Marked Event are sent to the server and then dispatched using the selected Event Mode.\n\nUse ReplicateAll mode for one-shot sounds or VFX that every relevant client should receive.");
 	const FText EventPermissionTooltip = LOCTEXT("EventPermissionTooltip", "Controls who is allowed to request this custom event.\n\nNone:\nAccept requests without an extra permission check.\n\nOwnerOnly:\nOnly the owning client may request the event.\n\nServerOnly:\nOnly calls initiated on the server are accepted.\n\nCustom:\nThe target object must approve the request with a validation function.\nUse CanReplicCall_<EventName>() or CanReplicCall_<EventName>(RequestingActor).");
 	const FText EventModeTooltip = LOCTEXT("EventModeTooltip", "Controls how Replic dispatches this custom event after the server accepts it.\n\nLocalOnly:\nExecute only on the local resolved target.\n\nServerOnly:\nExecute only on the server target.\n\nOwnerOnly:\nExecute on the server and send the event to the owning client.\n\nReplicateAll:\nExecute on the server and broadcast the event to all relevant clients.");
 
@@ -227,17 +228,17 @@ void FReplicEventDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder& De
 	TSharedPtr<FString> InitialPermissionMode = FoundPermissionMode ? *FoundPermissionMode : PermissionOptions[0];
 
 	IDetailCategoryBuilder& Category = DetailLayout.EditCategory(TEXT("Replic"), LOCTEXT("ReplicCategory", "Replic"));
-	Category.AddCustomRow(LOCTEXT("ReplicateAllEvent", "Replicate All"))
+	Category.AddCustomRow(LOCTEXT("EnableReplicEvent", "Enable Replic"))
 	.NameContent()
 	[
 		SNew(STextBlock)
-		.Text(LOCTEXT("ReplicateAllEventLabel", "Replicate All"))
-		.ToolTipText(ReplicateAllEventTooltip)
+		.Text(LOCTEXT("EnableReplicEventLabel", "Enable Replic"))
+		.ToolTipText(EnableReplicEventTooltip)
 	]
 	.ValueContent()
 	[
 		SNew(SCheckBox)
-		.ToolTipText(ReplicateAllEventTooltip)
+		.ToolTipText(EnableReplicEventTooltip)
 		.IsChecked_Lambda([this, EventNode]()
 		{
 			return GetBoolMetadata(EventNode, ReplicMetadata::EventEnabled, false) ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
@@ -435,7 +436,18 @@ void FReplicEventDetailsCustomization::SetBoolMetadata(UK2Node_CustomEvent* Even
 		return;
 	}
 
+	if (GetBoolMetadata(EventNode, Key, false) == bEnabled)
+	{
+		return;
+	}
+
+	const FScopedTransaction Transaction(LOCTEXT("SetReplicEventBoolMetadata", "Change Replic Event Setting"));
+	if (UBlueprint* Blueprint = EventNode->GetBlueprint())
+	{
+		Blueprint->Modify();
+	}
 	EventNode->Modify();
+
 	if (bEnabled)
 	{
 		EventNode->GetUserDefinedMetaData().SetMetaData(Key, FString(TEXT("true")));
@@ -456,6 +468,16 @@ void FReplicEventDetailsCustomization::SetStringMetadata(UK2Node_CustomEvent* Ev
 		return;
 	}
 
+	if (GetStringMetadata(EventNode, Key, TEXT("")) == Value)
+	{
+		return;
+	}
+
+	const FScopedTransaction Transaction(LOCTEXT("SetReplicEventStringMetadata", "Change Replic Event Setting"));
+	if (UBlueprint* Blueprint = EventNode->GetBlueprint())
+	{
+		Blueprint->Modify();
+	}
 	EventNode->Modify();
 	EventNode->GetUserDefinedMetaData().SetMetaData(Key, Value);
 	SyncReplicEventMetadata(EventNode->GetBlueprint(), EventNode);

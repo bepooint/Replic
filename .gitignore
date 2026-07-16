@@ -4,18 +4,12 @@
 /Intermediate/
 /Saved/
 
-# Local sandbox/project leftovers
-/Content/
-/Plugins/
-/Source/ReplicationSandbox/
-/Config/Default*.ini
-/ReplicationSandbox.uproject
-/ReplicationSandbox.sln
-/ReplicationSandbox.code-workspace
-/TempChatVerlauf.md
-
 # Local IDE artifacts
 /.idea/
 /.vs/
 /.vscode/
 
+# Local temp/log files
+*.log
+*.tmp
+*.bak

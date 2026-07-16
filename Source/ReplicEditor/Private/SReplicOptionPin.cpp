@@ -367,6 +367,22 @@ void SReplicOptionPin::RefreshOptions()
 {
 	ReplicPinOptionResolver::BuildOptions(GraphPinObj, Options);
 	Options.Insert(MakeNoneItem(), 0);
+
+	const FName CurrentValue = GraphPinObj ? FName(*GraphPinObj->GetDefaultAsString()) : NAME_None;
+	const bool bCurrentValueIsAvailable = CurrentValue.IsNone() || Options.ContainsByPredicate([CurrentValue](const TSharedPtr<FReplicPinOptionItem>& Item)
+	{
+		return Item.IsValid() && Item->Value == CurrentValue;
+	});
+
+	if (!bCurrentValueIsAvailable)
+	{
+		TSharedPtr<FReplicPinOptionItem> InvalidItem = MakeShared<FReplicPinOptionItem>();
+		InvalidItem->Value = CurrentValue;
+		InvalidItem->DisplayText = FText::Format(NSLOCTEXT("ReplicEditor", "InvalidReplicOption", "{0} (Invalid)"), FText::FromName(CurrentValue));
+		InvalidItem->TooltipText = NSLOCTEXT("ReplicEditor", "InvalidReplicOptionTooltip", "This saved selection is no longer available. Choose a current Replic-marked property or event.");
+		InvalidItem->SortKey = TEXT("!!Invalid");
+		Options.Insert(InvalidItem, 1);
+	}
 }
 
 void SReplicOptionPin::HandleComboBoxOpening()

@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Net/Serialization/FastArraySerializer.h"
+#include "Templates/SubclassOf.h"
 #include "UObject/SoftObjectPath.h"
 
 #include "ReplicTypes.generated.h"
@@ -153,6 +154,57 @@ struct REPLIC_API FReplicTargetDescriptor
 };
 
 USTRUCT(BlueprintType)
+struct REPLIC_API FReplicPropertyDebugInfo
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category = "Replic|Debug", meta = (ToolTip = "True when Replic resolved the supplied object to a supported runtime target."))
+	bool bTargetResolved = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Replic|Debug", meta = (ToolTip = "True when the target actor currently owns a ReplicTransportComponent."))
+	bool bHasReplicTransportComponent = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Replic|Debug", meta = (ToolTip = "True when the named property exists on the supplied target object."))
+	bool bPropertyFound = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Replic|Debug", meta = (ToolTip = "True when the property is enabled for Replic through metadata or a cooked runtime definition."))
+	bool bReplicEnabled = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Replic|Debug", meta = (ToolTip = "True when the transport currently stores a persistent value for this target and property."))
+	bool bHasPersistentState = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Replic|Debug")
+	FString TargetPath;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Replic|Debug")
+	FName PropertyName = NAME_None;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Replic|Debug")
+	FString PropertyType;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Replic|Debug", meta = (ToolTip = "Current local value serialized using the same text representation Replic uses for supported property values."))
+	FString LocalValue;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Replic|Debug", meta = (ToolTip = "Latest persistent value stored by the local ReplicTransportComponent, if available."))
+	FString PersistentValue;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Replic|Debug")
+	EReplicPermissionMode PermissionMode = EReplicPermissionMode::None;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Replic|Debug")
+	bool bPersistentStateConfigured = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Replic|Debug")
+	bool bUseBatching = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Replic|Debug")
+	float BatchIntervalSeconds = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Replic|Debug", meta = (ToolTip = "Short explanation of the first failed check, or a success summary."))
+	FString DiagnosticMessage;
+};
+
+USTRUCT(BlueprintType)
 struct REPLIC_API FReplicMarkedVariableDefinition
 {
 	GENERATED_BODY()
@@ -182,6 +234,14 @@ struct REPLIC_API FReplicMarkedEventDefinition
 	FReplicEventSettings Settings;
 };
 
+UENUM()
+enum class EReplicNamedValueKind : uint8
+{
+	SerializedText,
+	ObjectReference,
+	ClassReference
+};
+
 USTRUCT(BlueprintType)
 struct REPLIC_API FReplicNamedValue
 {
@@ -192,6 +252,15 @@ struct REPLIC_API FReplicNamedValue
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Replic", meta = (ToolTip = "The serialized text value used by Replic to send the parameter through the network."))
 	FString SerializedValue;
+
+	UPROPERTY()
+	EReplicNamedValueKind ValueKind = EReplicNamedValueKind::SerializedText;
+
+	UPROPERTY()
+	TObjectPtr<UObject> ObjectValue = nullptr;
+
+	UPROPERTY()
+	TSubclassOf<UObject> ClassValue;
 };
 
 USTRUCT(BlueprintType)

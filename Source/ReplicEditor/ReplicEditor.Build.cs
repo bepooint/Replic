@@ -1,4 +1,4 @@
-using UnrealBuildTool;
+﻿using UnrealBuildTool;
 
 public class ReplicEditor : ModuleRules
 {
@@ -18,6 +18,7 @@ public class ReplicEditor : ModuleRules
 				"Replic",
 				"Slate",
 				"SlateCore",
+				"UMG",
 				"UnrealEd"
 			}
 		);
@@ -29,6 +30,7 @@ public class ReplicEditor : ModuleRules
 				"CQTest",
 				"GraphEditor",
 				"KismetCompiler",
+				"NetCore",
 				"Projects"
 			}
 		);

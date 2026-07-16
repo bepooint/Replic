@@ -1,5 +1,6 @@
-#include "ReplicK2NodeUtils.h"
+﻿#include "ReplicK2NodeUtils.h"
 
+#include "Animation/AnimInstance.h"
 #include "Blueprint/UserWidget.h"
 #include "Components/ActorComponent.h"
 #include "EdGraph/EdGraphPin.h"
@@ -101,6 +102,83 @@ bool ReplicK2NodeUtils::HasReplicTransportComponent(const UBlueprint* Blueprint)
 	return false;
 }
 
+namespace
+{
+	bool IsSelfContextPin(const UEdGraphPin* ContextPin)
+	{
+		return ContextPin && ContextPin->LinkedTo.Num() == 0 && ContextPin->DefaultObject == nullptr && ContextPin->DefaultValue.IsEmpty();
+	}
+
+	UClass* GetPinObjectClass(const FEdGraphPinType& PinType)
+	{
+		if (UClass* PinClass = Cast<UClass>(PinType.PinSubCategoryObject.Get()))
+		{
+			return PinClass;
+		}
+
+		return nullptr;
+	}
+
+	bool IsSupportedReplicContextClass(const UClass* ContextClass)
+	{
+		return ContextClass
+			&& (ContextClass->IsChildOf<AActor>()
+				|| ContextClass->IsChildOf<UActorComponent>()
+				|| ContextClass->IsChildOf<UAnimInstance>()
+				|| ContextClass->IsChildOf<UUserWidget>());
+	}
+}
+
+bool ReplicK2NodeUtils::BuildContextObjectWarning(const UBlueprint* Blueprint, const UEdGraphPin* ContextPin, FString& OutWarning)
+{
+	OutWarning.Reset();
+
+	if (!ContextPin)
+	{
+		return false;
+	}
+
+	if (IsSelfContextPin(ContextPin))
+	{
+		if (!HasReplicTransportComponent(Blueprint))
+		{
+			OutWarning = TEXT("ContextObject uses Self, but this Blueprint has no ReplicTransportComponent. Add one to the actor that owns this graph, or connect a ContextObject that can access one. Client-side Replic requests from Self may fail.");
+			return true;
+		}
+
+		return false;
+	}
+
+	if (ContextPin->LinkedTo.Num() == 0)
+	{
+		return false;
+	}
+
+	for (const UEdGraphPin* LinkedPin : ContextPin->LinkedTo)
+	{
+		if (!LinkedPin)
+		{
+			continue;
+		}
+
+		UClass* LinkedClass = GetPinObjectClass(LinkedPin->PinType);
+		if (!LinkedClass || LinkedClass == UObject::StaticClass())
+		{
+			OutWarning = TEXT("ContextObject is connected, but the editor can only see a generic UObject type. Replic can only resolve Actors, ActorComponents, AnimInstances, and UserWidgets at runtime. If this request fails, connect Self from a Character/Pawn/Controller/Actor/Component or a widget with an owning player.");
+			return true;
+		}
+
+		if (!IsSupportedReplicContextClass(LinkedClass))
+		{
+			OutWarning = FString::Printf(
+				TEXT("ContextObject type '%s' is not a supported Replic runtime context. Connect an Actor, ActorComponent, AnimInstance, or UserWidget that can resolve to a replicated actor."),
+				*LinkedClass->GetName());
+			return true;
+		}
+	}
+
+	return false;
+}
 void ReplicK2NodeUtils::SetPinToolTip(UEdGraphPin* Pin, const FString& ToolTip)
 {
 	if (Pin)
@@ -131,12 +209,20 @@ void ReplicK2NodeUtils::ApplyReplicLibraryPinToolTips(UK2Node_CallFunction* Call
 
 	if (UEdGraphPin* TargetPin = CallNode->FindPin(TEXT("TargetObject")))
 	{
-		SetPinToolTip(TargetPin, TEXT("Object that owns the Replic-marked property.\n\nLeave this unconnected only when the property is on Self or in the current Blueprint.\n\nIf the property belongs to another actor or component, connect that object here first."));
+		const bool bIsEventCall = FunctionName == GET_FUNCTION_NAME_CHECKED(UReplicLibrary, CallMarkedEvent);
+		SetPinToolTip(TargetPin, bIsEventCall
+			? TEXT("Object that owns the Replic-marked custom event.\n\nLeave this unconnected only when the event is on Self or in the current Blueprint.\n\nIf the event belongs to another actor or component, connect that object here first.")
+			: TEXT("Object that owns the Replic-marked property.\n\nLeave this unconnected only when the property is on Self or in the current Blueprint.\n\nIf the property belongs to another actor or component, connect that object here first."));
 	}
 
 	if (UEdGraphPin* PropertyPin = CallNode->FindPin(TEXT("PropertyName")))
 	{
 		SetPinToolTip(PropertyPin, TEXT("Choose the Replic-marked property to use.\n\nThe list is filtered by the connected TargetObject when the editor can resolve it.\n\nChoose None to clear the current selection and reset the dynamic Replic pins."));
+	}
+
+	if (UEdGraphPin* EventPin = CallNode->FindPin(TEXT("EventName")))
+	{
+		SetPinToolTip(EventPin, TEXT("Choose the Replic-enabled custom event to call.\n\nThe list is filtered by the connected TargetObject when the editor can resolve it.\n\nChoose None to clear the current selection and reset generated argument pins."));
 	}
 
 	if (UEdGraphPin* ValuePin = CallNode->FindPin(TEXT("Value")))
@@ -177,6 +263,16 @@ void ReplicK2NodeUtils::ApplyReplicLibraryPinToolTips(UK2Node_CallFunction* Call
 		}
 
 		SetPinToolTip(ValuePin, ValueToolTip);
+	}
+
+	if (UEdGraphPin* NamePin = CallNode->FindPin(TEXT("Name")))
+	{
+		SetPinToolTip(NamePin, TEXT("Event argument name.\n\nThis must exactly match the parameter name on the Replic-enabled custom event."));
+	}
+
+	if (UEdGraphPin* ArgumentsPin = CallNode->FindPin(TEXT("Arguments")))
+	{
+		SetPinToolTip(ArgumentsPin, TEXT("Named event arguments passed to the selected Replic event.\n\nThe typed Replic Call Event node builds this list automatically. Use this pin manually only for advanced Call Marked Event workflows."));
 	}
 
 	if (UEdGraphPin* ItemPin = CallNode->FindPin(TEXT("Item")))
